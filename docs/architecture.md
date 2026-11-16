@@ -1,4 +1,4 @@
-# Architecture
+# Clawstrum architecture
 
 Clawstrum is one Node.js service on one host. SQLite holds work and output, and Discord carries all communication. Claude Code (Agent SDK), Codex (App Server or SDK) and Gemini (Antigravity CLI over ACP) run in supervised child processes with full host access. The separate processes give lifecycle control. They are not a sandbox.
 
