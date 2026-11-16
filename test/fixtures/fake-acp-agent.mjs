@@ -61,6 +61,9 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
         agentCapabilities: {
           loadSession: scenario !== 'noload' && scenario !== 'resume',
           sessionCapabilities: scenario === 'resume' ? { resume: {}, load: {} } : {},
+          ...(process.env.FAKE_ACP_APPEND
+            ? { _meta: { antigravity: { systemPrompt: { append: true } } } }
+            : {}),
         },
       },
     });
@@ -117,6 +120,14 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
                     { value: 'gemini-4-argon', name: 'Gemini 4 Argon' },
                   ],
           },
+          {
+            id: 'thought_level',
+            name: 'Thinking Level',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'medium',
+            options: ['low', 'medium', 'high'].map((value) => ({ value, name: value })),
+          },
         ],
       },
     });
@@ -141,6 +152,7 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
   }
   if (m.method !== 'session/prompt')
     return send({ id: m.id, error: { code: -32601, message: 'unknown' } });
+  const runningId = promptId;
   promptId = m.id;
   const sid = m.params.sessionId;
   promptSession = sid;
@@ -220,6 +232,56 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
       update(sid, { sessionUpdate: 'tool_call_update', toolCallId: id, status: 'completed' });
     }
     return;
+  }
+  // Live input, as agy does it: a second prompt ends the running turn (end_turn, no text) and
+  // starts a new one. steer_refused rejects the second prompt and lets the first turn finish.
+  // agy echoes each prompt as a user_message_chunk when its turn starts.
+  const echo = () =>
+    update(sid, { sessionUpdate: 'user_message_chunk', content: m.params.prompt[0] });
+  if (scenario === 'steer' || scenario === 'steer_refused') {
+    if (runningId === undefined) {
+      echo();
+      chunk(sid, 'Let me run it.');
+      update(sid, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 's1',
+        title: 'sleep',
+        kind: 'execute',
+      });
+      return;
+    }
+    if (scenario === 'steer_refused') {
+      promptId = runningId;
+      send({ id: m.id, error: { code: -32600, message: 'A prompt is already running' } });
+      update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 's1', status: 'completed' });
+      chunk(sid, 'First answer');
+      return send({ id: runningId, result: { stopReason: 'end_turn', usage } });
+    }
+    // The cut turn can still stream a little before it ends.
+    chunk(sid, 'tail of the cut turn');
+    send({ id: runningId, result: { stopReason: 'end_turn', usage } });
+    echo();
+    chunk(sid, 'Steered answer');
+    return send({ id: m.id, result: { stopReason: 'end_turn', usage } });
+  }
+  // A shell command outlives the turn that started it (agy moved it to the background).
+  if (scenario === 'background') {
+    echo();
+    if (runningId === undefined) {
+      update(sid, {
+        sessionUpdate: 'tool_call',
+        toolCallId: 'bg1',
+        title: 'sleep 99; echo done',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { CommandLine: 'sleep 99; echo done' },
+      });
+      chunk(sid, 'It runs in the background, I will report when it finishes.');
+      return send({ id: m.id, result: { stopReason: 'end_turn', usage } });
+    }
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'bg1', status: 'completed' });
+    if (!process.env.FAKE_ACP_SILENT) chunk(sid, 'It printed done.');
+    return send({ id: m.id, result: { stopReason: 'end_turn', usage } });
   }
   if (scenario === 'crash') process.exit(3);
 });

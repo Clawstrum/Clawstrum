@@ -287,17 +287,50 @@ export class AcpConnection {
   }
 }
 
-/** ACP stdio MCP server entry: env is a list of name/value pairs. */
-export function acpMcpServers(mcp: ProviderRequest['mcp'], toolless?: boolean) {
+/** ACP stdio MCP server entries (env is a list of name/value pairs): the owner's, then Clawstrum's. */
+export function acpMcpServers(
+  mcp: ProviderRequest['mcp'],
+  toolless?: boolean,
+  extra: ProviderRequest['extraMcp'] = {},
+) {
   if (toolless) return [];
+  const entry = (name: string, server: ProviderRequest['mcp']) => ({
+    name,
+    command: server.command,
+    args: server.args,
+    env: Object.entries(server.env).map(([key, value]) => ({ name: key, value })),
+  });
   return [
-    {
-      name: 'clawstrum',
-      command: mcp.command,
-      args: mcp.args,
-      env: Object.entries(mcp.env).map(([name, value]) => ({ name, value })),
-    },
+    ...Object.entries(extra ?? {}).map(([name, server]) => entry(name, server)),
+    entry('clawstrum', mcp),
   ];
+}
+
+/**
+ * agy's thinking level for the account's effort: low and medium as named, anything higher takes
+ * the highest level offered. Undefined when there is no effort, no such option, or nothing to change.
+ */
+export function pickThoughtLevel(
+  configOptions: any[] | undefined,
+  effort: Account['effort'],
+): { configId: string; value: string } | undefined {
+  if (!effort) return undefined;
+  const option = (configOptions ?? []).find(
+    (o: any) => o?.category === 'thought_level' || o?.id === 'thought_level',
+  );
+  const values: string[] = (option?.options ?? [])
+    .flatMap((o: any) => o?.options ?? [o])
+    .map((o: any) => String(o?.value));
+  if (!option || !values.length) return undefined;
+  const value = values.includes(effort)
+    ? effort
+    : effort === 'low' || effort === 'medium'
+      ? undefined
+      : values.includes('high')
+        ? 'high'
+        : values[values.length - 1];
+  if (!value || value === option.currentValue) return undefined;
+  return { configId: String(option.id), value };
 }
 
 /** Pick the permission option to answer with. Never throws: an unusable list cancels. */
@@ -386,6 +419,25 @@ export function pickModel(
   return { offered, select: found.value === current ? {} : found.apply };
 }
 
+/** Live input ends agy's running turn. Without this note the model drops the work that turn was
+ * doing; in live tests it said it was waiting for a command and ended without the result. */
+export const GEMINI_STEER_NOTE =
+  'This message arrived while you were working and ended your previous turn early. Finish that work too, unless this message changes it, then answer both in one reply.';
+
+export function backgroundNote(commands: string[]): string {
+  const list = commands.map((c) => `\`${c.length > 200 ? `${c.slice(0, 200)}…` : c}\``).join(', ');
+  return `Clawstrum: your turn ended while shell commands you started are still running in the background: ${list}. Nothing will tell you when they finish. If you need a result, wait for it now and then answer; if a command is meant to keep running, say so.`;
+}
+
+/** Token counts summed over the run's prompts (live input adds prompts). */
+function sumUsage(usages: any[]): Record<string, number> {
+  const sum: Record<string, number> = {};
+  for (const u of usages)
+    for (const [key, value] of Object.entries(u ?? {}))
+      if (typeof value === 'number' && Number.isFinite(value)) sum[key] = (sum[key] ?? 0) + value;
+  return sum;
+}
+
 export const geminiAcpProvider: Provider = {
   async run(r) {
     if (r.controller.signal.aborted) throw r.controller.signal.reason;
@@ -418,6 +470,8 @@ export const geminiAcpProvider: Provider = {
     ];
     let sessionId = '';
     let loading = false;
+    let accepting = false;
+    const injections = new Set<Promise<void>>();
     let ended = false;
     let toolCompletions = 0;
     let budgetExceeded = false;
@@ -428,8 +482,14 @@ export const geminiAcpProvider: Provider = {
     let lastPartialAt = 0;
     let failure: unknown;
     const toolNames = new Map<string, string>();
+    // Shell commands without a completion yet. agy reports one finishing only while a turn runs.
+    const running = new Map<string, string>();
     const refresh = new ContextRefresh(r);
-    let prompting: Promise<unknown> | undefined;
+    const contextUpdate = (snapshot: NonNullable<ReturnType<ContextRefresh['read']>>) =>
+      `CLAWSTRUM_CONTEXT_UPDATE\n${REFRESH_PROTOCOL}\nCurrent harness instructions and contextual MEMORY facts:\n${refresh.currentInstructions(snapshot)}`;
+    const prompts: Promise<any>[] = [];
+    // The last live input until agy echoes it.
+    let steered = '';
     const endSegment = () => {
       if (segment.trim()) {
         lastSegment = segment;
@@ -474,10 +534,24 @@ export const geminiAcpProvider: Provider = {
               }
               break;
             }
+            case 'user_message_chunk': {
+              // agy echoes a prompt as its turn starts. Text between live input and its echo is
+              // the tail of the turn that input cut off, not part of the answer.
+              const echoed = textOf(u.content);
+              if (steered && echoed && steered.startsWith(echoed.slice(0, 200))) {
+                steered = '';
+                endSegment();
+                lastSegment = '';
+                allText = '';
+              }
+              break;
+            }
             case 'tool_call': {
               endSegment();
               const name = String(u.kind ?? u.title ?? 'tool');
               toolNames.set(u.toolCallId, name);
+              if (u.kind === 'execute' && u.status !== 'completed' && u.status !== 'failed')
+                running.set(String(u.toolCallId), String(u.rawInput?.CommandLine ?? u.title ?? ''));
               r.onEvent({
                 type: 'activity',
                 detail: u,
@@ -487,6 +561,7 @@ export const geminiAcpProvider: Provider = {
             }
             case 'tool_call_update': {
               const done = u.status === 'completed' || u.status === 'failed';
+              if (done) running.delete(String(u.toolCallId));
               r.onEvent({
                 type: 'activity',
                 detail: u,
@@ -578,10 +653,18 @@ export const geminiAcpProvider: Provider = {
         if (error instanceof AcpRpcError) throw acpFailure(error);
         throw error;
       }
-      const mcpServers = acpMcpServers(r.mcp, r.toolless);
+      const mcpServers = acpMcpServers(r.mcp, r.toolless, r.extraMcp);
       // session/resume reopens a conversation without replaying it; session/load replays it as updates.
       const canResume = !!init?.agentCapabilities?.sessionCapabilities?.resume;
       const canLoad = !!init?.agentCapabilities?.loadSession;
+      // agy adds this text to its own system prompt and keeps it across session/resume; a second
+      // append would stack on the first, so it is sent at session/new only. Without the capability
+      // the base prompt and instructions lead the first prompt instead.
+      const canAppend = init?.agentCapabilities?._meta?.antigravity?.systemPrompt?.append === true;
+      const snapshot = refresh.read();
+      const initial = r.contextRefresh?.snapshot;
+      const current = snapshot && initial ? refresh.currentInstructions(snapshot) : r.instructions;
+      const system = usesBasePrompt(r) ? `${basePrompt(r)}\n\n${current}` : current;
       // A new ACP session has no earlier conversation, even when the engine asked to resume one.
       let resumed = false;
       let created: any;
@@ -597,7 +680,17 @@ export const geminiAcpProvider: Provider = {
           resumed = true;
           loading = false;
         } else {
-          created = await connection.request('session/new', { cwd: r.cwd, mcpServers }, 120000);
+          created = await connection.request(
+            'session/new',
+            {
+              cwd: r.cwd,
+              mcpServers,
+              ...(canAppend
+                ? { _meta: { antigravity: { systemPrompt: { append: system } } } }
+                : {}),
+            },
+            120000,
+          );
           sessionId = created?.sessionId;
           if (!sessionId)
             throw new ProviderFailure('transient', 'Gemini did not return a session ID');
@@ -639,47 +732,129 @@ export const geminiAcpProvider: Provider = {
           'fatal',
           `Antigravity CLI does not offer model ${model}; offered: ${choice.offered.join(', ') || 'no model picker'}`,
         );
-      if (choice.select?.method)
-        await connection
+      let options = created?.configOptions;
+      if (choice.select?.method) {
+        const selected = await connection
           .request(choice.select.method, { sessionId, ...choice.select.params }, 15000)
           .catch((error) => {
             throw new ProviderFailure('fatal', `Could not select model ${model}: ${String(error)}`);
           });
-      // ACP has no system or developer-instruction field. The base prompt and instructions travel
-      // at the start of the first prompt.
+        // The levels on offer can depend on the model.
+        if (selected?.configOptions?.length) options = selected.configOptions;
+      }
+      const level = pickThoughtLevel(options, account.effort);
+      if (level)
+        await connection
+          .request('session/set_config_option', { sessionId, ...level }, 15000)
+          .catch((error) =>
+            r.onEvent({
+              type: 'diagnostic',
+              detail: { event: 'gemini_thought_level_failed', ...level, error: String(error) },
+            }),
+          );
       let text = r.prompt;
-      const snapshot = refresh.read();
-      const initial = r.contextRefresh?.snapshot;
       if (!resumed) {
-        const current =
-          snapshot && initial ? refresh.currentInstructions(snapshot) : r.instructions;
-        text = usesBasePrompt(r)
-          ? `${basePrompt(r)}\n\n${current}\n\n${r.prompt}`
-          : `${current}\n\n${r.prompt}`;
+        if (!canAppend) text = `${system}\n\n${r.prompt}`;
         const delivered = snapshot ?? initial;
         if (delivered) refresh.delivered(delivered, sessionId);
       } else if (snapshot && refresh.changed(snapshot)) {
-        text = `CLAWSTRUM_CONTEXT_UPDATE\n${REFRESH_PROTOCOL}\nCurrent harness instructions and contextual MEMORY facts:\n${refresh.currentInstructions(snapshot)}\n\n${r.prompt}`;
+        text = `${contextUpdate(snapshot)}\n\n${r.prompt}`;
         refresh.delivered(snapshot, sessionId);
       }
       r.onEvent({ type: 'ready' });
-      prompting = connection.request(
-        'session/prompt',
-        { sessionId, prompt: [{ type: 'text', text }] },
-        0,
-      );
+      const prompt = (body: string) => {
+        const sent = connection.request(
+          'session/prompt',
+          { sessionId, prompt: [{ type: 'text', text: body }] },
+          0,
+        );
+        prompts.push(sent);
+        return sent;
+      };
+      prompt(text);
+      accepting = !r.toolless;
+      const refused = new Set<Promise<any>>();
+      // Live input is another session/prompt: agy ends the running turn at once (end_turn, usually
+      // no text) and starts a new one on the whole conversation.
+      r.attachInjector?.((ids, input) => {
+        if (!accepting || r.controller.signal.aborted) return false;
+        const latest = refresh.read();
+        const changed = latest && refresh.changed(latest) ? latest : undefined;
+        // What the cut turn wrote stays in history; the answer comes from the new turn.
+        endSegment();
+        lastSegment = '';
+        allText = '';
+        const previous = prompts[prompts.length - 1]!;
+        steered = [changed ? contextUpdate(changed) : '', GEMINI_STEER_NOTE, input]
+          .filter(Boolean)
+          .join('\n\n');
+        const next = prompt(steered);
+        let previousEnded = false;
+        const injection = new Promise<boolean>((resolve) => {
+          const accepted = () => {
+            previousEnded = true;
+            resolve(true);
+          };
+          previous.then(accepted, accepted);
+          // Refused while the running turn goes on: that turn still gives the answer.
+          next.catch(() => {
+            if (previousEnded) return;
+            refused.add(next);
+            resolve(false);
+          });
+        }).then((accepted) => {
+          const ok = accepted && !r.controller.signal.aborted;
+          if (ok && changed) refresh.delivered(changed, sessionId);
+          r.onEvent({ type: 'injected', detail: { ids, ok } });
+          if (ok) r.onEvent({ type: 'input_started', detail: { ids } });
+        });
+        injections.add(injection);
+        void injection.finally(() => injections.delete(injection));
+        return true;
+      });
       let response: any;
-      try {
-        response = await prompting;
-      } catch (error) {
-        if (r.controller.signal.aborted) throw r.controller.signal.reason;
-        if (error instanceof AcpRpcError) throw acpFailure(error);
-        throw error;
+      const usages: any[] = [];
+      let followedUp = false;
+      // The answer of the turn before the follow-up; sent ahead of the follow-up's, as on Claude.
+      let earlier = '';
+      for (let i = 0; ; i++) {
+        if (i === prompts.length) {
+          // agy moves a long shell command to the background and may end the turn without its
+          // result; nothing wakes the model when it finishes. One follow-up asks it to wait.
+          if (
+            followedUp ||
+            r.toolless ||
+            !running.size ||
+            response?.stopReason !== 'end_turn' ||
+            budgetExceeded ||
+            !(r.research?.enabled && r.research.holdBackgroundTasks)
+          )
+            break;
+          followedUp = true;
+          endSegment();
+          earlier = (lastSegment || allText).trim();
+          lastSegment = '';
+          allText = '';
+          prompt(backgroundNote([...running.values()]));
+        }
+        try {
+          response = await prompts[i];
+          if (response?.usage) usages.push(response.usage);
+        } catch (error) {
+          if (r.controller.signal.aborted) throw r.controller.signal.reason;
+          // A refused live input, or a turn that live input cut off.
+          if (refused.has(prompts[i]!) || i < prompts.length - 1) continue;
+          if (error instanceof AcpRpcError) throw acpFailure(error);
+          throw error;
+        }
       }
+      accepting = false;
+      // An acknowledgment must reach the engine before the result does.
+      await Promise.all(injections);
       ended = true;
       endSegment();
-      if (response?.usage)
-        r.onEvent({ type: 'usage', detail: response.usage, usage: geminiTurnUsage(response) });
+      const usage = usages.length > 1 ? sumUsage(usages) : usages[0];
+      if (usage) r.onEvent({ type: 'usage', detail: usage, usage: geminiTurnUsage({ usage }) });
       if (r.controller.signal.aborted) throw r.controller.signal.reason;
       if (budgetExceeded)
         throw new ProviderFailure(
@@ -707,14 +882,18 @@ export const geminiAcpProvider: Provider = {
           );
       }
       const final = (lastSegment || allText).trim();
-      r.onEvent({ type: 'partial', detail: final });
-      return final;
+      if (earlier && final)
+        r.onEvent({ type: 'result_text', detail: { text: earlier, final: false } });
+      r.onEvent({ type: 'partial', detail: final || earlier });
+      return final || earlier;
     } finally {
+      accepting = false;
       ended = true;
       r.controller.signal.removeEventListener('abort', abort);
       await cancelled;
       await connection.close();
-      void prompting?.catch(() => {});
+      for (const sent of prompts) void sent.catch(() => {});
+      await Promise.allSettled([...injections]);
       fs.rmSync(logDir, { recursive: true, force: true });
     }
   },

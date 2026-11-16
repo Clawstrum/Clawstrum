@@ -71,7 +71,7 @@ export function classifyError(error: unknown): ProviderFailure {
 export function isModelRefusal(failure: ProviderFailure): boolean {
   return (
     failure.kind === 'fatal' &&
-    /model_not_found|model[^.\n]{0,40}(may not exist|does not exist|not found)|(may not|do not|don't) have access to (the |this )?model|you may not have access/i.test(
+    /model_not_found|model[^.\n]{0,40}(may not exist|does not exist|not found)|(may not|do not|don't) have access to (the |this )?model|you may not have access|does not offer model/i.test(
       failure.message,
     )
   );

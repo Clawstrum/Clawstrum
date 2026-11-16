@@ -7,12 +7,16 @@ import { fileURLToPath } from 'node:url';
 import { ProviderFailure } from '../src/accounts.js';
 import {
   AcpRpcError,
+  GEMINI_STEER_NOTE,
   acpFailure,
+  acpMcpServers,
+  backgroundNote,
   geminiAcpProvider,
   geminiLoginProbe,
   nonSubscriptionAuth,
   permissionOutcome,
   pickModel,
+  pickThoughtLevel,
 } from '../src/gemini-acp.js';
 import { accountEnvironment, providers } from '../src/providers.js';
 import { geminiCommand, runtimeCommand } from '../src/runtime.js';
@@ -21,6 +25,7 @@ import { geminiTurnUsage } from '../src/usage.js';
 import { testAccount } from '../src/account-test.js';
 import { addAccount } from '../src/account-cli.js';
 import { saveConfig } from '../src/config.js';
+import { researchSchema } from '../src/research/config.js';
 import { fixture } from './helpers.js';
 import { BASE_PROMPT, mainBasePrompt } from '../src/base-prompt.js';
 import type { Account, ProviderEvent, ProviderRequest } from '../src/types.js';
@@ -597,4 +602,236 @@ test('account add accepts gemini and points to the login command', (t) => {
       maxConcurrent: 4,
     },
   );
+});
+
+test('pickThoughtLevel maps effort onto the thinking levels agy offers', () => {
+  const offered = (values: string[], currentValue = 'medium') => [
+    { id: 'model', category: 'model', currentValue: 'm', options: [{ value: 'm' }] },
+    {
+      id: 'thought_level',
+      category: 'thought_level',
+      currentValue,
+      options: values.map((value) => ({ value, name: value })),
+    },
+  ];
+  const standard = offered(['low', 'medium', 'high']);
+  assert.equal(pickThoughtLevel(standard, undefined), undefined);
+  assert.equal(pickThoughtLevel(undefined, 'high'), undefined);
+  assert.equal(pickThoughtLevel([standard[0]], 'high'), undefined);
+  assert.equal(pickThoughtLevel(standard, 'medium'), undefined);
+  assert.deepEqual(pickThoughtLevel(standard, 'low'), { configId: 'thought_level', value: 'low' });
+  assert.deepEqual(pickThoughtLevel(standard, 'high'), {
+    configId: 'thought_level',
+    value: 'high',
+  });
+  assert.deepEqual(pickThoughtLevel(standard, 'xhigh'), {
+    configId: 'thought_level',
+    value: 'high',
+  });
+  assert.deepEqual(pickThoughtLevel(standard, 'max'), { configId: 'thought_level', value: 'high' });
+  assert.deepEqual(pickThoughtLevel(offered(['low', 'medium', 'ultra']), 'max'), {
+    configId: 'thought_level',
+    value: 'ultra',
+  });
+  assert.equal(pickThoughtLevel(offered(['medium', 'high'], 'high'), 'low'), undefined);
+  const grouped = [
+    {
+      id: 'thought_level',
+      category: 'thought_level',
+      currentValue: 'medium',
+      options: [
+        { options: [{ value: 'low' }, { value: 'medium' }] },
+        { options: [{ value: 'high' }] },
+      ],
+    },
+  ];
+  assert.deepEqual(pickThoughtLevel(grouped, 'max'), { configId: 'thought_level', value: 'high' });
+});
+
+test("acpMcpServers lists the owner's servers before clawstrum, with env as name/value pairs", () => {
+  const mcp = { command: 'node', args: ['mcp.js'], env: { CLAWSTRUM_SESSION: 's1' } };
+  const extra = {
+    notes: { command: 'notes-mcp', args: ['--stdio'], env: { NOTES_DIR: '/n', MODE: 'ro' } },
+  };
+  assert.deepEqual(acpMcpServers(mcp, false, extra), [
+    {
+      name: 'notes',
+      command: 'notes-mcp',
+      args: ['--stdio'],
+      env: [
+        { name: 'NOTES_DIR', value: '/n' },
+        { name: 'MODE', value: 'ro' },
+      ],
+    },
+    {
+      name: 'clawstrum',
+      command: 'node',
+      args: ['mcp.js'],
+      env: [{ name: 'CLAWSTRUM_SESSION', value: 's1' }],
+    },
+  ]);
+  assert.deepEqual(acpMcpServers(mcp, true, extra), []);
+});
+
+test('with the system-prompt append capability, the base prompt and instructions go to session/new, not the prompt', async (t) => {
+  const append = { FAKE_ACP_APPEND: '1' };
+  const lead = setup(t);
+  await geminiAcpProvider.run(lead.request('text', {}, append));
+  assert.deepEqual(lead.received('session/new')[0].params._meta, {
+    antigravity: { systemPrompt: { append: `${BASE_PROMPT}\n\nINSTRUCTIONS BLOCK` } },
+  });
+  assert.equal(lead.received('session/prompt')[0].params.prompt[0].text, 'USER PROMPT');
+  const subagent = setup(t);
+  await geminiAcpProvider.run(subagent.request('text', { subagent: true }, append));
+  assert.equal(
+    subagent.received('session/new')[0].params._meta.antigravity.systemPrompt.append,
+    'INSTRUCTIONS BLOCK',
+  );
+  assert.equal(subagent.received('session/prompt')[0].params.prompt[0].text, 'USER PROMPT');
+  const plain = setup(t);
+  await geminiAcpProvider.run(plain.request('text'));
+  assert.equal(plain.received('session/new')[0].params._meta, undefined);
+});
+
+test('account effort high sets the thinking level; medium or no effort leaves it', async (t) => {
+  const thought = (s: ReturnType<typeof setup>) =>
+    s
+      .received('session/set_config_option')
+      .filter((m) => m.params.configId === 'thought_level')
+      .map((m) => m.params);
+  const high = setup(t);
+  await geminiAcpProvider.run(
+    high.request('text', { account: { ...high.account, effort: 'high' } }),
+  );
+  assert.deepEqual(thought(high), [
+    { sessionId: 'sess-new-1', configId: 'thought_level', value: 'high' },
+  ]);
+  const medium = setup(t);
+  await geminiAcpProvider.run(
+    medium.request('text', { account: { ...medium.account, effort: 'medium' } }),
+  );
+  assert.deepEqual(thought(medium), []);
+  const none = setup(t);
+  await geminiAcpProvider.run(none.request('text'));
+  assert.deepEqual(thought(none), []);
+});
+
+/** Runs a steer scenario, injecting ['m1'] once the first turn's tool call has started. */
+async function steer(s: ReturnType<typeof setup>, scenario: string) {
+  let inject: ((ids: string[], text: string) => boolean) | undefined;
+  let accepted: boolean | undefined;
+  const final = await geminiAcpProvider.run(
+    s.request(scenario, {
+      attachInjector: (i) => {
+        inject = i;
+      },
+      onEvent: (e) => {
+        s.events.push(e);
+        if (accepted === undefined && e.type === 'activity' && e.tool?.state === 'started')
+          accepted = inject!(['m1'], 'new message');
+      },
+    }),
+  );
+  return { final, accepted };
+}
+
+test('live input sends a second prompt; the answer comes from the new turn', async (t) => {
+  const s = setup(t);
+  const { final, accepted } = await steer(s, 'steer');
+  assert.equal(accepted, true);
+  assert.equal(final, 'Steered answer');
+  assert.ok(!final.includes('tail of the cut turn'));
+  assert.ok(
+    s.events.some(
+      (e) =>
+        e.type === 'injected' &&
+        JSON.stringify(e.detail) === JSON.stringify({ ids: ['m1'], ok: true }),
+    ),
+  );
+  assert.ok(s.events.some((e) => e.type === 'input_started'));
+  const prompts = s.received('session/prompt');
+  assert.equal(prompts.length, 2);
+  const second = prompts[1].params.prompt[0].text;
+  assert.ok(second.includes(GEMINI_STEER_NOTE));
+  assert.ok(second.includes('new message'));
+  // Both prompts returned the fixture's usage, so each field is doubled.
+  assert.deepEqual(s.events.find((e) => e.type === 'usage')?.detail, {
+    inputTokens: 200,
+    outputTokens: 40,
+    cachedReadTokens: 80,
+    thoughtTokens: 10,
+    totalTokens: 240,
+  });
+});
+
+test('live input agy refuses is reported as not taken, and the running turn gives the answer', async (t) => {
+  const s = setup(t);
+  const { final, accepted } = await steer(s, 'steer_refused');
+  assert.equal(accepted, true);
+  assert.equal(final, 'First answer');
+  assert.ok(
+    s.events.some(
+      (e) =>
+        e.type === 'injected' &&
+        JSON.stringify(e.detail) === JSON.stringify({ ids: ['m1'], ok: false }),
+    ),
+  );
+  assert.ok(!s.events.some((e) => e.type === 'input_started'));
+});
+
+test('a turn that ends with a shell command still running gets one follow-up prompt', async (t) => {
+  const research = researchSchema.parse({ enabled: true, holdBackgroundTasks: true });
+  const s = setup(t);
+  const final = await geminiAcpProvider.run(s.request('background', { research }));
+  assert.equal(final, 'It printed done.');
+  const prompts = s.received('session/prompt');
+  assert.equal(prompts.length, 2);
+  assert.equal(prompts[1].params.prompt[0].text, backgroundNote(['sleep 99; echo done']));
+  const early = s.events.findIndex(
+    (e) =>
+      e.type === 'result_text' &&
+      JSON.stringify(e.detail) ===
+        JSON.stringify({
+          text: 'It runs in the background, I will report when it finishes.',
+          final: false,
+        }),
+  );
+  assert.ok(early >= 0);
+  assert.ok(early < s.events.findIndex((e) => e.type === 'partial' && e.detail === final));
+  assert.deepEqual(s.events.find((e) => e.type === 'usage')?.detail, {
+    inputTokens: 200,
+    outputTokens: 40,
+    cachedReadTokens: 80,
+    thoughtTokens: 10,
+    totalTokens: 240,
+  });
+
+  const silent = setup(t);
+  const quiet = await geminiAcpProvider.run(
+    silent.request('background', { research }, { FAKE_ACP_SILENT: '1' }),
+  );
+  assert.equal(quiet, 'It runs in the background, I will report when it finishes.');
+  assert.ok(!silent.events.some((e) => e.type === 'result_text'));
+});
+
+test('no follow-up prompt without holdBackgroundTasks, with research disabled, or toolless', async (t) => {
+  const cases: Array<[string, Partial<ProviderRequest>]> = [
+    ['hold off', { research: researchSchema.parse({ enabled: true, holdBackgroundTasks: false }) }],
+    [
+      'research disabled',
+      { research: researchSchema.parse({ enabled: false, holdBackgroundTasks: true }) },
+    ],
+    [
+      'toolless',
+      {
+        research: researchSchema.parse({ enabled: true, holdBackgroundTasks: true }),
+        toolless: true,
+      },
+    ],
+  ];
+  for (const [label, extra] of cases) {
+    const s = setup(t);
+    await geminiAcpProvider.run(s.request('background', extra));
+    assert.equal(s.received('session/prompt').length, 1, label);
+  }
 });

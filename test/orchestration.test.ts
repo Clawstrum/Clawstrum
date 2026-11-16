@@ -111,6 +111,14 @@ test('lead instructions describe the actual subscription route and enabled worke
     assert.match(disabled.instructions, /Managed subagent tools are unavailable/);
     assert.match(disabled.instructions, /Native provider delegation: not disabled/);
   }
+  // Nothing blocks Antigravity CLI's own delegation tools, so its line must not claim they are disabled.
+  const gemini = { id: 'g', provider: 'gemini' as const, home: f.config.accounts[0]!.home };
+  const context = buildContext(f.store, f.session, gemini, [], 4000, 100000, f.config.research);
+  assert.match(
+    context.instructions,
+    /Native provider delegation: off by Clawstrum policy but not blocked/,
+  );
+  assert.doesNotMatch(context.instructions, /Native provider delegation: disabled/);
 });
 
 test('an unavailable explicitly requested provider queues without silently downgrading or switching provider', async (t) => {
