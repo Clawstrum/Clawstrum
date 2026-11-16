@@ -18,7 +18,7 @@ These run as hooks before each tool call. Gemini runs them through Antigravity C
 
 - A Write or Edit to a `.md`, `.markdown`, `.tex`, `.bib` or `.rst` file is checked for author and year pairs that disagree with the saved record of the DOI or arXiv ID next to them. An Edit only reports problems it introduces. In strict mode, the first citation finding per run and agent refuses the write once.
 - A Write or Edit outside the channel folder, the Clawstrum home, the system temp folder and `research.writeRoots` is reported. In strict mode it is refused every time.
-- Where a `WRITING.md` exists, strict mode refuses a write of 300 or more characters to a `.tex`, `.sty` or `.cls` file until the agent has read it, directly or through a skill with "writing" in its name. It refuses at most three times per agent between compactions.
+- Where a `WRITING.md` exists, strict mode refuses a write of 300 or more characters to a `.tex`, `.sty` or `.cls` file until the agent has read it, directly or through a skill with "writing" in its name. It refuses at most three times per agent between compactions. In the default mode the write goes through, with a note to read the rules before the next one.
 - Writes to `.tex`, `.sty` or `.cls` files (where a writing-rules file exists) and plotting code in `.py` files get style advice. This advice never refuses a write, in any mode. Payloads over 2,000,000 characters are skipped.
 - When Slurm support is on, a raw `sbatch` command gets advice to use `research_cluster preflight` and `submit`, which check the script and start a job watch.
 - Fetching a PDF directly gets advice to use `research_paper`. An Unpaywall request without an email gets advice to set `research.email`.

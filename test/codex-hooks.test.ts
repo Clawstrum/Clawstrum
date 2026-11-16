@@ -384,6 +384,7 @@ test('strict: a .tex write is refused until a finished shell read of the rules f
     assert.equal(r.hookEventName, 'PreToolUse');
     assert.equal(r.permissionDecision, 'deny');
     assert.match(r.permissionDecisionReason, /nothing has read them during this run/);
+    assert.match(r.permissionDecisionReason, /Refusing Write on .*then re-issue the write/);
   }
   assert.deepEqual(
     out.filter((_, i) => ![0, 4, 6].includes(i)),
@@ -408,6 +409,9 @@ test('advisory: the same .tex write goes ahead and the writing warning is delive
     out[0].hookSpecificOutput.additionalContext,
     /nothing has read them during this run/,
   );
+  // The write went through, so the note must not read as a refusal or ask for the write again.
+  assert.match(out[0].hookSpecificOutput.additionalContext, /goes ahead, no need to repeat it/);
+  assert.doesNotMatch(out[0].hookSpecificOutput.additionalContext, /Refusing|re-issue/);
   // Once the rules were read there is nothing to warn about.
   assert.equal(out[1], null);
   assert.equal(out[2], null);

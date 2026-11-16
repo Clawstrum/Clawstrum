@@ -72,6 +72,8 @@ export interface WritingGateInput {
   satisfied: boolean;
   /** Refusals already issued during this run. */
   blocksSoFar: number;
+  /** False when the caller lets the write through (advisory validation). Default true. */
+  enforced?: boolean;
 }
 
 /** Refusal text, or null when the write should proceed. */
@@ -81,6 +83,14 @@ export function writingGateRefusal(input: WritingGateInput): string | null {
   if (input.toolName !== 'Write' && input.toolName !== 'Edit') return null;
   if (!input.target || !isManuscriptPath(input.target)) return null;
   if (typeof input.payload !== 'string' || input.payload.length < MIN_PROSE_CHARS) return null;
+  // Worded as a refusal ("re-issue the write"), the note invites a repeat of a write that went through.
+  if (input.enforced === false)
+    return (
+      `This ${input.toolName} on ${input.target} goes ahead, no need to repeat it. This ` +
+      `installation keeps writing rules at ${input.rulesPaths.join(' and ')}, and nothing has ` +
+      `read them during this run: read the file before the next manuscript write. Writes under ` +
+      `${MIN_PROSE_CHARS} characters are not checked.`
+    );
   return (
     `Refusing ${input.toolName} on ${input.target}: this installation keeps writing rules at ` +
     `${input.rulesPaths.join(' and ')}, and nothing has read them during this run. Read the file, ` +

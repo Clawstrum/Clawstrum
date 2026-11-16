@@ -71,7 +71,7 @@ clawstrum prose lint /project/notes.md
 
 It checks three things: em dashes (the Unicode character U+2014 or LaTeX `---`, except in rules and table separators), bold inside a line (markdown `**bold**`, `\textbf{}`, `{\bf }`, but not a bold run that opens the line) and headings that argue (a fixed list of verb-led openings, or ending in `.` or `?`). It prints findings as JSON, exits 1 if there are any, and never edits the file. Fenced blocks, `verbatim`, `lstlisting`, `minted`, LaTeX comments and front matter are skipped. Word choice, passive voice and sentence length are left to your own rules file.
 
-On Claude runs with research tools on, the same checks also run on every `.tex`, `.sty` and `.cls` write. The findings come back to the agent on that tool call and never block it. An edit reports only the findings it adds. In strict mode, the manuscript write gate also refuses a large `.tex` write until your writing rules are in context.
+On Claude and Codex runs with research tools on, the same checks also run on every `.tex`, `.sty` and `.cls` write. The findings come back to the agent on that tool call and never block it. Gemini gets only refusals, so it doesn't see them. An edit reports only the findings it adds. In strict mode, the manuscript write gate also refuses a large `.tex` write until your writing rules are in context.
 
 The gate and the automatic check stay off until a `WRITING.md` exists in the workspace or in the Clawstrum home (for every workspace). Start from `templates/skills/onboarding/WRITING.example.md`, copied to `skills/onboarding/` in the home, and edit it.
 

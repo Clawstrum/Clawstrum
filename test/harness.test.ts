@@ -78,6 +78,14 @@ test('an over-budget memory file refuses shell writes but not shell reads', (t: 
   assert.match(refused.issues[0]!, /500 characters, 500%/);
   // Not correctable: a one-shot correction budget must not be spendable on it.
   assert.equal(refused.correctable, false);
+  // The default (advisory) lets the write run, so the note must not read as a refusal.
+  assert.match(refused.issues[0]!, /^This shell write goes ahead, no need to repeat it\./);
+  assert.doesNotMatch(refused.issues[0]!, /Refusing|include whatever you were about to append/);
+  const strict = researchSchema.parse({ enabled: true, validation: 'strict' });
+  assert.match(
+    validationIssues(store, strict, 'Bash', { command: 'echo n >> MEMORY.md' }, limits).issues[0]!,
+    /^Refusing this shell write: MEMORY\.md is 500 characters, 500%/,
+  );
 
   assert.deepEqual(
     validationIssues(store, config, 'Bash', { command: 'wc -c MEMORY.md' }, limits).issues,
@@ -135,6 +143,17 @@ test('a manuscript write is refused until the rules file has been read', () => {
   });
   assert.match(refused!, /\/w\/WRITING\.md/);
   assert.match(refused!, /then re-issue the write/);
+  // Advisory lets the write through, so the note must not read as a refusal or ask for the write again.
+  const warned = writingGateRefusal({
+    ...base,
+    enforced: false,
+    toolName: 'Write',
+    target: '/w/paper.tex',
+    payload: prose,
+  });
+  assert.match(warned!, /^This Write on \/w\/paper\.tex goes ahead, no need to repeat it\./);
+  assert.match(warned!, /\/w\/WRITING\.md/);
+  assert.doesNotMatch(warned!, /Refusing|re-issue/);
   // Markdown prose is most of what a session writes all day, so it is not this gate's business.
   assert.equal(
     writingGateRefusal({ ...base, toolName: 'Write', target: '/w/notes.md', payload: prose }),

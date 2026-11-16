@@ -154,10 +154,15 @@ export function validationIssues(
       const writes = writeTargets(String(input.command ?? ''), path.basename(budgeted)).some(
         (token) => path.resolve(limits.cwd ?? '.', token) === budgeted,
       );
-      if (writes)
-        hard.push(
-          `Refusing this shell write: ${path.basename(budgeted)} is ${current} characters, ${Math.round((current / budget) * 100)}% of the ${budget} it is fitted to when read back into the prompt. A shell command's effect on file size cannot be checked before it runs, so while the file is over budget it may only be changed through Write or Edit, which are measured. A shrinking rewrite is what is wanted here: evict superseded entries, compress what stays, and include whatever you were about to append in the same rewrite. Reading the file is unaffected.`,
-        );
+      if (!writes) continue;
+      const size = `${path.basename(budgeted)} is ${current} characters, ${Math.round((current / budget) * 100)}% of the ${budget} it is fitted to when read back into the prompt.`;
+      // Only strict refuses on this (a Bash call never carries a routing issue). Under advisory the
+      // write goes ahead, so the note must not ask for it again.
+      hard.push(
+        config.validation === 'strict'
+          ? `Refusing this shell write: ${size} A shell command's effect on file size cannot be checked before it runs, so while the file is over budget it may only be changed through Write or Edit, which are measured. A shrinking rewrite is what is wanted here: evict superseded entries, compress what stays, and include whatever you were about to append in the same rewrite. Reading the file is unaffected.`
+          : `This shell write goes ahead, no need to repeat it. ${size} A shell command's effect on file size cannot be checked before it runs, so while the file is over budget change it only through Write or Edit, which are measured. A shrinking rewrite is what is wanted here: evict superseded entries and compress what stays. Reading the file is unaffected.`,
+      );
     }
   issues.push(...hard);
   if (tool === 'WebFetch' && typeof input.url === 'string') {
@@ -376,6 +381,8 @@ export function researchHooks(r: ProviderRequest): { hooks?: Options['hooks']; c
       rulesPaths: writingRulePaths(),
       satisfied: writingState.satisfied,
       blocksSoFar: writingState.blocks,
+      // Strict refuses on it every time (never correctable, see below); advisory lets the write through.
+      enforced: config.validation === 'strict',
     });
     // Never correctable: the remedy is a Read, not a revision of the payload, so it must not be
     // able to spend the one-shot correction budget the citation findings use.
