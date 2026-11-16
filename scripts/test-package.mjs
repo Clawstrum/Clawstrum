@@ -108,6 +108,7 @@ try {
       for await(const line of createInterface({input:process.stdin})) {
         const m=JSON.parse(line);
         if(m.method==='initialize')send({id:m.id,result:{userAgent:'package-test'}});
+        if(m.method==='hooks/list'){const flag=process.argv.find(a=>a.startsWith('hooks.PreToolUse='));const command=flag?JSON.parse(/command=("(?:[^"\\\\]|\\\\.)*")/.exec(flag)[1]):null;send({id:m.id,result:{data:[{cwd:m.params.cwds[0],warnings:[],errors:[],hooks:command?[{key:'k',eventName:'preToolUse',handlerType:'command',command,currentHash:'sha256:h',trustStatus:'trusted'}]:[]}]}});}
         if(m.method==='thread/start'||m.method==='thread/resume') {mcp=m.params.config.mcp_servers.clawstrum;send({id:m.id,result:{thread:{id:'packaged-thread'}}});}
         if(m.method==='turn/start') {
           const args=[...process.argv.slice(2),...Object.entries(mcp).flatMap(([key,value])=>key==='env'?Object.entries(value).map(([k,v])=>'mcp_servers.clawstrum.env.'+k+'='+JSON.stringify(v)):['mcp_servers.clawstrum.'+key+'='+JSON.stringify(value)])];
@@ -148,6 +149,12 @@ try {
   while (!fs.existsSync(record) && Date.now() < deadline) await delay(50);
   assert.ok(fs.existsSync(record), 'Compiled worker must run the selected CLI');
   const invocation = JSON.parse(fs.readFileSync(record, 'utf8'));
+  const hookFlag = invocation.args.find((a) => a.startsWith('hooks.PreToolUse='));
+  assert.ok(
+    hookFlag?.includes("/dist/hook-client.js' --format codex"),
+    'Codex runs with research on get the packaged hook client',
+  );
+  assert.ok(fs.existsSync(path.join(installed, 'dist', 'hook-client.js')));
   const overrides = Object.fromEntries(
     invocation.args
       .filter((a) => a.startsWith('mcp_servers.clawstrum.'))
