@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { StreamHistory } from './provider-history.js';
 import { codexBasePrompt, usesBasePrompt } from './base-prompt.js';
 import { ContextRefresh, REFRESH_PROTOCOL } from './instructions.js';
@@ -11,6 +14,9 @@ import { codexOrchestrationConfig } from './orchestration.js';
 import type { Provider, ProviderRequest } from './types.js';
 import { codexWorkerSandbox } from './worker-sandbox.js';
 import { CodexUsage, type UsageSnapshot } from './usage.js';
+import { startHookRelay } from './hook-relay.js';
+import { researchHooks } from './research/hooks.js';
+import { codexHookArgs, codexHookCommand, trustCodexHooks } from './codex-hooks.js';
 
 /** Clawstrum's own server goes last so an owner-configured server cannot replace it. */
 export function codexMcpServers(r: ProviderRequest) {
@@ -56,6 +62,8 @@ export class CodexConnection {
       Partial<Pick<ProviderRequest, 'research' | 'mcp' | 'subagent' | 'sandbox' | 'role'>>,
     notification: (message: RpcMessage) => void,
     failure: (error: unknown) => void,
+    /** Command for Codex's PreToolUse hook; set only when Clawstrum's tool checks apply to the run. */
+    hookCommand?: string,
   ) {
     const runtime = runtimeCommand(r.account);
     const sandbox = codexWorkerSandbox(r);
@@ -84,6 +92,7 @@ export class CodexConnection {
           '-c',
           `${key}=${JSON.stringify(value)}`,
         ]),
+        ...(hookCommand ? codexHookArgs(hookCommand) : []),
         ...(r.toolless
           ? Object.entries(maintenanceCodexConfig.features).flatMap(([key, value]) => [
               '-c',
@@ -264,135 +273,170 @@ export const codexAppServerProvider: Provider = {
     // Startup can fail before we begin awaiting the turn.
     void finished.catch(() => {});
     const injections = new Set<Promise<void>>();
-    const connection = new CodexConnection(
-      r,
-      ({ method, params: p }) => {
-        if (method === 'account/rateLimits/updated') {
-          for (const bucket of ['primary', 'secondary']) {
-            const window = p?.rateLimits?.[bucket];
-            if (typeof window?.usedPercent !== 'number') continue;
-            r.onEvent({
-              type: 'quota',
-              quota: {
-                rejected: false,
-                utilization: window.usedPercent / 100,
-                resetsAt: typeof window.resetsAt === 'number' ? window.resetsAt * 1000 : undefined,
-                bucket: `${p.rateLimits.limitId ?? 'codex'}:${bucket}`,
-              },
-            });
-          }
-          return;
-        }
-        if (!threadId || p?.threadId !== threadId) return;
-        if (method === 'item/started' && p.item?.type === 'contextCompaction') {
-          r.onEvent({
-            type: 'activity',
-            detail: { type: 'contextCompaction', status: 'compacting' },
+    // Clawstrum's tool checks reach Codex through its PreToolUse hook and a relay socket in a private temp dir.
+    let research: ReturnType<typeof researchHooks> | undefined;
+    let relay: Awaited<ReturnType<typeof startHookRelay>> | undefined;
+    let relayDir: string | undefined;
+    let hookCommand: string | undefined;
+    const releaseHooks = async () => {
+      await relay?.close();
+      research?.close();
+      if (relayDir) fs.rmSync(relayDir, { recursive: true, force: true });
+    };
+    if (!r.toolless)
+      try {
+        research = researchHooks(r);
+        if (research.hooks) {
+          relayDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawstrum-codex-'));
+          relay = await startHookRelay({
+            hooks: research.hooks,
+            format: 'codex',
+            dir: relayDir,
+            onEvent: r.onEvent,
           });
-          return;
+          hookCommand = codexHookCommand();
         }
-        if (
-          method === 'thread/compacted' ||
-          (method === 'item/completed' && p.item?.type === 'contextCompaction')
-        ) {
-          forceContext = true;
-          r.onEvent({ type: 'activity', detail: { type: 'contextCompaction', status: null } });
-          r.onEvent({
-            type: 'history',
-            detail: {
-              id: `codex-compaction:${threadId}:${p.item?.id ?? randomUUID()}`,
-              kind: 'compaction',
-              source: threadId,
-              content: { method, ...p },
-              counted: false,
-            },
-          });
-          void reloadContext?.().catch(fail);
-          return;
-        }
-        if (method === 'turn/started') {
-          if (turnId && turnId !== p.turn.id) return;
-          turnId = p.turn.id;
-          if (!ended) accepting = true;
-          r.onEvent({ type: 'ready' });
-          return;
-        }
-        const eventTurn = p.turnId ?? p.turn?.id;
-        if (!turnId || eventTurn !== turnId || ended) return;
-        if (method === 'turn/completed') {
-          if (latestUsage)
+      } catch (error) {
+        await releaseHooks();
+        throw error;
+      }
+    let connection: CodexConnection;
+    try {
+      connection = new CodexConnection(
+        { ...r, env: { ...r.env, ...relay?.env } },
+        ({ method, params: p }) => {
+          if (method === 'account/rateLimits/updated') {
+            for (const bucket of ['primary', 'secondary']) {
+              const window = p?.rateLimits?.[bucket];
+              if (typeof window?.usedPercent !== 'number') continue;
+              r.onEvent({
+                type: 'quota',
+                quota: {
+                  rejected: false,
+                  utilization: window.usedPercent / 100,
+                  resetsAt:
+                    typeof window.resetsAt === 'number' ? window.resetsAt * 1000 : undefined,
+                  bucket: `${p.rateLimits.limitId ?? 'codex'}:${bucket}`,
+                },
+              });
+            }
+            return;
+          }
+          if (!threadId || p?.threadId !== threadId) return;
+          if (method === 'item/started' && p.item?.type === 'contextCompaction') {
             r.onEvent({
-              type: 'usage',
-              usage: { ...latestUsage, final: true },
-              detail: { normalizedUsage: latestUsage },
+              type: 'activity',
+              detail: { type: 'contextCompaction', status: 'compacting' },
             });
-          accepting = false;
-          ended = true;
-          finish(p.turn);
-        } else if (method === 'error') {
-          r.onEvent({ type: 'diagnostic', detail: p });
-          if (!p.willRetry) {
-            accepting = false;
-            fail(turnFailure(p.error));
+            return;
           }
-        } else if (method === 'thread/tokenUsage/updated') {
-          latestUsage = usage.observe(p.tokenUsage);
-          r.onEvent({ type: 'usage', detail: p.tokenUsage, usage: latestUsage });
-        } else if (method === 'item/agentMessage/delta') {
-          history.delta(p.itemId, method, p.delta ?? '');
-          // Avoid a synchronous SQLite write for every token; completed items retain full text.
-          if (Date.now() - lastDeltaAt >= 1000) {
-            lastDeltaAt = Date.now();
-            r.onEvent({ type: 'partial', detail: p.delta });
-          }
-        } else if (method === 'item/started' || method === 'item/completed') {
-          const item = p.item;
-          if (method === 'item/completed') history.completed(item.id);
-          if (method === 'item/completed' && item.type !== 'reasoning')
+          if (
+            method === 'thread/compacted' ||
+            (method === 'item/completed' && p.item?.type === 'contextCompaction')
+          ) {
+            forceContext = true;
+            r.onEvent({ type: 'activity', detail: { type: 'contextCompaction', status: null } });
             r.onEvent({
               type: 'history',
               detail: {
-                id: `codex:${threadId}:${item.id}`,
-                kind: 'provider_item',
+                id: `codex-compaction:${threadId}:${p.item?.id ?? randomUUID()}`,
+                kind: 'compaction',
                 source: threadId,
-                content: item,
-                counted: item.type !== 'userMessage',
+                content: { method, ...p },
+                counted: false,
               },
             });
-          if (item.type === 'agentMessage') {
-            if (method === 'item/completed') {
-              if (item.text?.trim()) final = item.text;
-              r.onEvent({ type: 'partial', detail: item.text ?? '' });
-            }
-          } else if (item.type !== 'reasoning' && item.type !== 'userMessage') {
-            r.onEvent({
-              type: 'activity',
-              detail: item,
-              tool: ['commandExecution', 'mcpToolCall', 'fileChange', 'webSearch'].includes(
-                item.type,
-              )
-                ? {
-                    id: item.id,
-                    name: item.type,
-                    state: method === 'item/completed' ? 'completed' : 'started',
-                  }
-                : undefined,
-            });
-            if (r.maxTurns && method === 'item/completed' && ++toolItems > r.maxTurns)
-              fail(
-                new ProviderFailure(
-                  'budget',
-                  `Configured completed-tool budget exhausted (${r.maxTurns}); inspect partial artifacts`,
-                ),
-              );
+            void reloadContext?.().catch(fail);
+            return;
           }
-        } else if (/^item\/(commandExecution|fileChange|mcpToolCall)\//.test(method ?? '')) {
-          if (typeof p.delta === 'string') history.delta(p.itemId, method!, p.delta);
-          r.onEvent({ type: 'activity', detail: { method, ...p } });
-        }
-      },
-      fail,
-    );
+          if (method === 'turn/started') {
+            if (turnId && turnId !== p.turn.id) return;
+            turnId = p.turn.id;
+            if (!ended) accepting = true;
+            r.onEvent({ type: 'ready' });
+            return;
+          }
+          const eventTurn = p.turnId ?? p.turn?.id;
+          if (!turnId || eventTurn !== turnId || ended) return;
+          if (method === 'turn/completed') {
+            if (latestUsage)
+              r.onEvent({
+                type: 'usage',
+                usage: { ...latestUsage, final: true },
+                detail: { normalizedUsage: latestUsage },
+              });
+            accepting = false;
+            ended = true;
+            finish(p.turn);
+          } else if (method === 'error') {
+            r.onEvent({ type: 'diagnostic', detail: p });
+            if (!p.willRetry) {
+              accepting = false;
+              fail(turnFailure(p.error));
+            }
+          } else if (method === 'thread/tokenUsage/updated') {
+            latestUsage = usage.observe(p.tokenUsage);
+            r.onEvent({ type: 'usage', detail: p.tokenUsage, usage: latestUsage });
+          } else if (method === 'item/agentMessage/delta') {
+            history.delta(p.itemId, method, p.delta ?? '');
+            // Avoid a synchronous SQLite write for every token; completed items retain full text.
+            if (Date.now() - lastDeltaAt >= 1000) {
+              lastDeltaAt = Date.now();
+              r.onEvent({ type: 'partial', detail: p.delta });
+            }
+          } else if (method === 'item/started' || method === 'item/completed') {
+            const item = p.item;
+            if (method === 'item/completed') history.completed(item.id);
+            if (method === 'item/completed' && item.type !== 'reasoning')
+              r.onEvent({
+                type: 'history',
+                detail: {
+                  id: `codex:${threadId}:${item.id}`,
+                  kind: 'provider_item',
+                  source: threadId,
+                  content: item,
+                  counted: item.type !== 'userMessage',
+                },
+              });
+            if (item.type === 'agentMessage') {
+              if (method === 'item/completed') {
+                if (item.text?.trim()) final = item.text;
+                r.onEvent({ type: 'partial', detail: item.text ?? '' });
+              }
+            } else if (item.type !== 'reasoning' && item.type !== 'userMessage') {
+              r.onEvent({
+                type: 'activity',
+                detail: item,
+                tool: ['commandExecution', 'mcpToolCall', 'fileChange', 'webSearch'].includes(
+                  item.type,
+                )
+                  ? {
+                      id: item.id,
+                      name: item.type,
+                      state: method === 'item/completed' ? 'completed' : 'started',
+                    }
+                  : undefined,
+              });
+              if (r.maxTurns && method === 'item/completed' && ++toolItems > r.maxTurns)
+                fail(
+                  new ProviderFailure(
+                    'budget',
+                    `Configured completed-tool budget exhausted (${r.maxTurns}); inspect partial artifacts`,
+                  ),
+                );
+            }
+          } else if (/^item\/(commandExecution|fileChange|mcpToolCall)\//.test(method ?? '')) {
+            if (typeof p.delta === 'string') history.delta(p.itemId, method!, p.delta);
+            r.onEvent({ type: 'activity', detail: { method, ...p } });
+          }
+        },
+        fail,
+        hookCommand,
+      );
+    } catch (error) {
+      await releaseHooks();
+      throw error;
+    }
     let interruption: Promise<unknown> | undefined;
     const abort = () => {
       accepting = false;
@@ -409,6 +453,19 @@ export const codexAppServerProvider: Provider = {
         clientInfo: { name: 'clawstrum', title: 'Clawstrum', version: '0.1.0' },
       });
       connection.send({ method: 'initialized', params: {} });
+      // Codex skips an untrusted hook silently, so the trust is written before the thread starts.
+      if (hookCommand)
+        await trustCodexHooks({
+          request: (method, params) => connection.request(method, params),
+          cwd: r.cwd,
+          command: hookCommand,
+          codexHome: r.env.CODEX_HOME ?? r.account.home,
+          onFallback: (error) =>
+            r.onEvent({
+              type: 'diagnostic',
+              detail: { event: 'codex_hook_trust_fallback', error: String(error) },
+            }),
+        });
       const maintenance = r.toolless
         ? maintenanceCodexOverrides(
             (
@@ -553,9 +610,13 @@ export const codexAppServerProvider: Provider = {
       clearInterval(refreshTimer);
       r.controller.signal.removeEventListener('abort', abort);
       await interruption;
-      await connection.close();
-      history.flush();
-      await Promise.allSettled([refreshing, ...injections]);
+      try {
+        await connection.close();
+        history.flush();
+        await Promise.allSettled([refreshing, ...injections]);
+      } finally {
+        await releaseHooks();
+      }
     }
   },
 };

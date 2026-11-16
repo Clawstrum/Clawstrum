@@ -49,6 +49,11 @@ for await(const line of createInterface({input:process.stdin})) {
   if(mode==='missing-thread')send({id:m.id,error:{code:-32600,message:'no rollout found for thread'}});
   else send({id:m.id,result:{thread:{id:'thread-live'}}});
  }
+ else if(m.method==='hooks/list') {
+  const flag=process.argv.find(a=>a.startsWith('hooks.PreToolUse='));
+  const command=flag?JSON.parse(/command=("(?:[^"\\\\]|\\\\.)*")/.exec(flag)[1]):null;
+  send({id:m.id,result:{data:[{cwd:m.params.cwds[0],warnings:[],errors:[],hooks:command?[{key:'k',eventName:'preToolUse',handlerType:'command',command,currentHash:'sha256:h',trustStatus:'trusted'}]:[]}]}});
+ }
  else if(m.method==='thread/inject_items')send({id:m.id,result:{}});
  else if(m.method==='turn/start') {
   notify('turn/started',{turn:{id:'turn-live',status:'inProgress',items:[]}});
