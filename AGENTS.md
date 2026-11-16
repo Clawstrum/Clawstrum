@@ -1,6 +1,6 @@
 # Installing Clawstrum
 
-If the user wants to install, set up or start Clawstrum (or says "help me install", "get started", "set up"), do not improvise. Read `.claude/skills/setup/SKILL.md` completely and follow it step by step. It is written for people who have never used a terminal: one question at a time, every step checked before the next, and the Discord bot token is never typed into this chat.
+If the user wants to install, set up or start Clawstrum (or says "help me install", "get started", "set up"), do not improvise. Read `.claude/skills/setup/SKILL.md` completely and follow it step by step. It is written for people who have never used a terminal: one question at a time, every step checked before the next, and the Discord bot token kept out of this chat unless the user chooses to paste it.
 
 Contributing to Clawstrum is a different task; see the section below.
 

@@ -2,6 +2,11 @@
 
 Clawstrum maintains **one active `AGENTS.md` per scope**: the shared installation (`H`, `CLAWSTRUM_HOME`) and each Discord channel (`W`). Instructions describe how to act. The document's `## MEMORY` section describes current knowledge and work.
 
+<p align="center">
+  <img src="images/memory.png" width="600" alt="The AGENTS.md files a run loads, from the provider account down to the channel. The agent changes all of them except the provider account file, decisions you state are saved into the channel file, and every run is recorded in a history archive the agent can search. In the background, memory review and consolidation rewrite the shared and channel files from that history.">
+  <br><em>Blue: files the agent and the background passes (dashed) change.</em>
+</p>
+
 ## Files and authority
 
 ```text

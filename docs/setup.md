@@ -2,7 +2,7 @@
 
 ## Quick start
 
-With Claude Code or Codex on this computer, the easiest start is to open one of them in the repository folder and say "help me install Clawstrum" (in Claude Code, `/setup`). It follows `.claude/skills/setup/SKILL.md`: one question at a time, each step checked before the next, and the bot token never typed into the chat. Without either, install from the clone and run setup:
+With Claude Code, Codex or Antigravity CLI (Gemini) on this computer, the easiest start is to open one of them in the repository folder and say "help me install Clawstrum" (in Claude Code, `/setup`). It follows `.claude/skills/setup/SKILL.md`: one question at a time, each step checked before the next, and the bot token kept out of the chat unless you choose to paste it there. Without either, install from the clone and run setup:
 
 ```sh
 git clone https://github.com/clawstrum/clawstrum.git

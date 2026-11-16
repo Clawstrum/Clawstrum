@@ -19,18 +19,18 @@ Clawstrum runs Claude Code, Codex or Gemini as a collaborator you talk to in Dis
 
 ## Quick start
 
-You need Linux or macOS, Claude Code or Codex to run the setup, and a Claude, ChatGPT or Google subscription with Gemini for the agent.
+You need Linux or macOS, Claude Code, Codex or Antigravity CLI (Gemini) to run the setup, and a Claude, ChatGPT or Google subscription with Gemini for the agent.
 
 ```sh
 git clone https://github.com/clawstrum/clawstrum.git
 cd clawstrum
-claude        # or: codex
+claude        # or: codex, or agy
 ```
 
-Type `/setup` in Claude Code, or say "help me install Clawstrum" in Codex. The agent walks you through the rest one step at a time and checks each step before the next.
+Type `/setup` in Claude Code, or say "help me install Clawstrum" in Codex or Antigravity CLI. The agent walks you through the rest one step at a time and checks each step before the next.
 
 1. It asks where the agent will run: your computer, a server or a cluster. Then it installs Clawstrum from this folder, so the agent can later change its own code, and a current Node.js if you agree.
-2. It takes you through Discord, with a link to each page: an account and a server if you need them, then the bot. The bot token goes into a file, never into the chat.
+2. It takes you through Discord, with a link to each page: an account and a server if you need them, then the bot. You put the bot token into a private file yourself, which keeps it out of the chat, or paste it in the chat and the agent saves it.
 3. It invites the bot and makes your first channel, `main`.
 4. It signs the agent in to Claude, ChatGPT or Google, starts it and keeps it running: as a service, or in tmux on a cluster login node, with the agent's heavy work sent to jobs.
 
@@ -40,11 +40,15 @@ To install without an agent, see [setup](docs/setup.md).
 
 ## What it does
 
+<p align="center">
+  <img src="docs/images/inside.png" width="640" alt="Inside one run: your message goes to a router that picks a skill, then to Claude Code, Codex or Gemini. The agent reads and edits its memory and skills. On Claude runs, hooks check each tool call before it runs.">
+</p>
+
 - **One channel per project.** Each Discord channel has its own conversation, files and memory. By default only the owners you configure can give it work.
 - **Live steering.** A message you send while the agent works goes into the run that is already going, so you can correct or add to a request without stopping it. This also works after its answer while work it started still runs, and the agent can send a correction to a subagent it started. Claude and Codex runs only: on Gemini a message waits until the current run ends. A message with a file attached waits too, on every provider.
 - **Keeps watch for you.** The agent can watch a file, a command or a cluster job, or schedule a run for later. Clawstrum waits without calling the model and wakes the agent when something happens. An optional mode keeps it working toward your goal while you are away.
 - **A prompt that is yours.** Main runs replace the coding agent's default system prompt, written for software engineering, with Clawstrum's base prompt for a research collaborator. Your `AGENTS.md` instructions follow it, including how you like answers. Both are plain files you can change. On Gemini, whose prompt can't be replaced, the base prompt opens each new session's first message.
-- **Memory you can read.** Memory lives in plain `AGENTS.md` files, from one for all channels down to one per channel. Decisions you state are saved in your own words, and every message and tool result stays searchable.
+- **Memory you can read.** Memory lives in plain `AGENTS.md` files, from one for all channels down to one per channel. Decisions you state are saved in your own words, and every message and tool result stays searchable ([how memory works](docs/memory-lifecycle.md)).
 - **Improves itself.** Once a day it rewrites each channel's memory from the new conversation and cites the records behind each change. A nightly self-review in `main` looks for what went wrong, proposes or makes small fixes within the scope you allow, and checks later whether they worked.
 - **Habits in the harness.** Skills hold recurring procedures and are picked before each run. On Claude runs, hooks check each tool call before it executes. Side work goes to subagents with fixed roles, such as explorer, coder, checker and reviewer.
 - **Research tools.** Literature search, paper retrieval with citation checks, Slurm jobs, scheduled runs, and channel groups that share findings between related projects.

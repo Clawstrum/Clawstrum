@@ -13,7 +13,7 @@ You are helping someone install Clawstrum. They may have never used a terminal. 
 2. Plain words. Say "server", not "guild". When you must use a technical word, explain it in the same sentence.
 3. Check every step before the next one. Name the command you ran and say what it showed. Never say "should be fine".
 4. The user only does what needs a person: make a Discord account, make a server, use the bot page in the Discord developer portal (copy the token, turn on one switch), and click the invite link. Everything else you do or read from the machine.
-5. The bot token is a password for the bot. It never goes into this chat. Never ask for it, never repeat it, never print it. Never read `.env` (no `cat`, `Read`, `grep` that prints it, no `env` or `printenv` without `| cut -d= -f1`). You only run checks that print yes or no. Why: this chat is saved on the model provider's servers and in local transcripts, and anyone who has the token controls the bot. If the user pastes it into the chat anyway, tell them: "Please reset the token on the Bot page (Reset Token) and put the new one only in the file." Do not use the pasted one.
+5. The bot token is a password for the bot: anyone who has it controls the bot. The safer way keeps it out of this chat: the user puts it into the file in a second terminal (step 2c), because this chat is saved on the model provider's servers and in local transcripts. The user may paste it here instead; then say once that the file is safer, and save it as step 2c shows. Either way, never repeat it, never print it, never write it anywhere but `.env`. Never read `.env` (no `cat`, `Read`, `grep` that prints it, no `env` or `printenv` without `| cut -d= -f1`). You only run checks that print yes or no.
 6. Do not use `sudo` unless the user agrees to that exact command. Fix problems yourself when you can (see the fixes below); only hand a step to the user when it needs their hands.
 7. If a command is blocked by your sandbox or permission prompt, say which command, and ask the user to approve it or to run it themselves in a normal terminal. Do not look for a way around it.
 8. Use placeholders below as `<LIKE_THIS>`. Fill them from real answers or command output, never from memory.
@@ -29,7 +29,7 @@ Some steps below use two options of `clawstrum setup`: `--status` (prints JSON: 
 
 ## Step 0. Which agent is running this?
 
-You know which one you are. Say it once: "I am running inside Claude Code" or "I am running inside Codex". It only matters for two things: the question tool in rule 1, and the sandbox note in rule 7 (Codex may block writes outside the repo folder; Claude Code may ask for approval per command).
+You know which one you are. Say it once: "I am running inside Claude Code", "I am running inside Codex" or "I am running inside Antigravity CLI". It only matters for two things: the question tool in rule 1, and the sandbox note in rule 7 (Codex may block writes outside the repo folder; Claude Code may ask for approval per command).
 
 Do not mix this up with the provider the user will pick in step 3. Setup can run inside Codex and still use a Claude subscription for the agent, and the other way round.
 
@@ -164,8 +164,15 @@ Then tell the user, one numbered list, and wait for "done":
 1. Open https://discord.com/developers/applications (same account).
 2. **New Application**, name it `<AGENT_NAME>`, accept the terms, **Create**.
 3. Left side, **Bot**. Under **Privileged Gateway Intents** turn on **Message Content Intent** (this lets the bot read what you write; without it the agent cannot start). You do not need the other two switches. **Save Changes**.
-4. Still on the Bot page, click **Reset Token**, confirm, and **Copy** the token. It is shown only once. Do not paste it here.
-5. Open a *second terminal* (not this chat). Run: `nano -w "<HOME>/.env"` (use the real path; `-w` stops the editor from breaking the long line). Put the cursor right after `DISCORD_BOT_TOKEN=`, paste the token with no spaces and no quotes, keep it on that one line. Save with Ctrl+O then Enter, leave with Ctrl+X. (Nano is a small text editor that is on macOS and Linux. Any plain text editor works if the user prefers one.)
+4. Still on the Bot page, click **Reset Token**, confirm, and **Copy** the token. It is shown only once.
+5. Put the token into the file. Safer, because the token never enters this chat: open a *second terminal* (not this chat) and run `nano -w "<HOME>/.env"` (use the real path; `-w` stops the editor from breaking the long line). Put the cursor right after `DISCORD_BOT_TOKEN=`, paste the token with no spaces and no quotes, keep it on that one line. Save with Ctrl+O then Enter, leave with Ctrl+X. (Nano is a small text editor that is on macOS and Linux. Any plain text editor works if the user prefers one.) Quicker: paste the token here and I save it; it then stays in this chat's records.
+
+If the user pasted the token, save it with this command, `<TOKEN>` being the pasted text without spaces or quotes. Do not repeat the token in your reply. If the user is asked to approve this command, they allow it once, not always: an always-allow rule can store the command, token included, in a settings file.
+
+```sh
+H="<HOME>"; T='<TOKEN>'
+( umask 077; grep -v '^DISCORD_BOT_TOKEN=' "$H/.env" > "$H/.env.new"; printf 'DISCORD_BOT_TOKEN=%s\n' "$T" >> "$H/.env.new"; mv "$H/.env.new" "$H/.env" )
+```
 
 Check without printing anything secret:
 
@@ -185,7 +192,7 @@ From the JSON you need: `discord.tokenAccepted`, `discord.bot.username`, `discor
 
 Never print or quote the token if it appears anywhere (it should not).
 
-- `token.saved` is false: the token is not in `<HOME>/.env` yet; redo the editor step. `discord.tokenAccepted` is false, Discord rejected the token: the user copied the wrong thing or Reset Token ran again after copying. Redo steps 4 and 5.
+- `token.saved` is false: the token is not in `<HOME>/.env` yet; redo step 5. `discord.tokenAccepted` is false, Discord rejected the token: the user copied the wrong thing or Reset Token ran again after copying. Redo steps 4 and 5.
 - `discord.messageContentIntent` is false (`next` is `message-content-intent`): send the user back to step 3 (Bot page, the switch, **Save Changes**). Check again.
 - Both fine: tell the user "Discord accepts the token and the bot is called `<BOT_NAME>`. Application ID `<APPLICATION_ID>`." (IDs are not secret.)
 
@@ -375,7 +382,7 @@ Run `clawstrum doctor` and `clawstrum setup --status` first, read both, then pic
 | Symptom | Likely cause | Check | Fix |
 | --- | --- | --- | --- |
 | `clawstrum start` stops with "disallowed intents" | Message Content Intent is off | status shows it off | Bot page, turn it on, **Save Changes**, start again |
-| Bot shows offline in Discord | The agent is not running, or the token is rejected | `doctor` heartbeat; status says Discord rejected the token | Run `clawstrum start`; if rejected, Reset Token and put the new one in `<HOME>/.env` with an editor (never in chat) |
+| Bot shows offline in Discord | The agent is not running, or the token is rejected | `doctor` heartbeat; status says Discord rejected the token | Run `clawstrum start`; if rejected, Reset Token and save the new one as in step 2c |
 | Bot online, no reaction, no answer | Your Discord user ID in the settings is not yours. Messages from anyone else are dropped without a word | `ownerIds` in `<HOME>/config.json` against the owner ID from status | Fix `discord.ownerIds` in `config.json` (not secret), restart the agent. Or run `clawstrum setup --reconfigure` in the second terminal; each question shows the current value |
 | Bot online, answers elsewhere but not in `main` | Wrong channel ID in the settings | `discord.channelIds` in `config.json` against the channel Discord reports | Correct the ID in `config.json`; the running agent picks up channel changes without a restart |
 | `doctor` or setup says the bot is not in the server | The invite link was not completed | status shows no servers for the bot | Open the invite link again, pick the server, **Authorize** |
