@@ -93,7 +93,7 @@ All settings are in the [configuration reference](configuration.md).
 
 ## Research
 
-The daemon also runs research subagents and a Slurm monitor next to the main queue, sharing account capacity. Clawstrum's tools, the research tools included, work on all three providers. The checks before each tool call run on all three, and Codex and Gemini get only their refusals. See [research](research.md).
+The daemon also runs research subagents and a Slurm monitor next to the main queue, sharing account capacity. Clawstrum's tools, the research tools included, work on all three providers. The checks before each tool call run on all three. Codex gets their refusals and warnings, Gemini only their refusals. See [research](research.md).
 
 ## Channel groups
 

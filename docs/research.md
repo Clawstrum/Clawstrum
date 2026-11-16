@@ -117,7 +117,7 @@ On each message you send, message recall ranks notes no longer in loaded memory 
 
 ## Checks
 
-Hooks check tool calls: citations and write locations in Write and Edit, writing rules for LaTeX files, raw `sbatch`, direct PDF fetches and Unpaywall calls without a contact. `research.validation` decides whether a finding is advice (`advisory`, the default) or refused (`strict`), or turns the checks off (`off`). Codex and Gemini get only refusals, so there the checks act only under `strict`, and fetches through their own web tools aren't checked. See [hooks and gates](hooks-and-gates.md).
+Hooks check tool calls: citations and write locations in Write and Edit, writing rules for LaTeX files, raw `sbatch`, direct PDF fetches and Unpaywall calls without a contact. `research.validation` decides whether a finding is advice (`advisory`, the default) or refused (`strict`), or turns the checks off (`off`). Gemini gets only refusals, so there the checks act only under `strict`. Fetches through Codex's and Gemini's own web tools aren't checked. See [hooks and gates](hooks-and-gates.md).
 
 Native `Task`, `Agent` and `Workflow` calls go to `research_delegate` instead, and subagents may not delegate. `research.workers.enforceRoles` sets this: `deny` (default), `advise` or `off`. It applies only when roles are configured. `validation: off` turns this check off too, but [native delegation](orchestration.md#native-delegation) tools stay removed while `enforceRoles` is `deny`.
 
