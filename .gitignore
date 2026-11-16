@@ -1,0 +1,31 @@
+node_modules/
+dist/
+dist.prev/
+dist.next/
+dist.failed/
+*.tgz
+.env
+.clawstrum/
+*.db*
+coverage/
+
+# Private in-repo deployment data and provider credentials; never publish.
+/runtime/
+/groups/
+/channels/
+/history/
+/legacy/
+/migration-private/
+/provider-profiles/
+/tools/
+/logs/
+/.claude/*
+# The guided-install skill is the one public file under .claude/.
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/setup/
+/data/
+/store/
+
+__pycache__/
+*.pyc

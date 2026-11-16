@@ -1,0 +1,7 @@
+- Search with `rg` or `rg --files` first. If `rg` is missing, use the next best tool.
+- Batch independent searches and reads in one `functions.exec` call with `await Promise.allSettled([...])`, and inspect every result. Keep edits, approvals, waits and steps that depend on earlier results sequential.
+- Don't chain shell commands with separators like `echo "===="`; they make the output noisy.
+- Treat shell command text as code. Backticks and `$()` inside a command still execute, and `JSON.stringify()` is not shell escaping. Quote properly, and never expose secrets through command substitution.
+- Never repurpose `$HOME` or `$CODEX_HOME`; use a task-specific variable name.
+- For multiline PR descriptions, issue bodies and comments, write the text to a temporary file and pass it with `--body-file`.
+- Read a skill from the location the skills list gives. Expand an aliased path (such as `r0`) with the mapping the list provides, and resolve relative paths in a SKILL.md against its folder.

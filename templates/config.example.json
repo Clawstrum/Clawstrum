@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "name": "Clawstrum",
+  "discord": {
+    "ownerIds": ["123456789012345678"],
+    "guildId": "234567890123456789",
+    "channelIds": ["345678901234567890"],
+    "allowDMs": true
+  },
+  "accounts": [
+    {
+      "id": "main",
+      "provider": "codex",
+      "home": "accounts/main/codex"
+    },
+    {
+      "id": "backup",
+      "provider": "codex",
+      "home": "accounts/backup/codex"
+    }
+  ],
+  "runtime": {
+    "maxConcurrent": 4,
+    "unknownQuotaCooldownMs": 900000,
+    "startupTimeoutMs": 120000,
+    "silenceTimeoutMs": 600000,
+    "turnTimeoutMs": 7200000,
+    "abortGraceMs": 3000,
+    "promptChars": 100000,
+    "slowRetryMs": 300000,
+    "quotaWarningThreshold": 0.9,
+    "blockedVersions": [],
+    "consolidation": {
+      "enabled": true,
+      "models": {
+        "claude": "sonnet"
+      },
+      "chunkChars": 120000,
+      "maxChunksPerPass": 8,
+      "timeoutMs": 600000
+    }
+  },
+  "research": {
+    "enabled": true,
+    "validation": "advisory",
+    "workers": {
+      "maxConcurrent": 2,
+      "timeoutMs": 1200000
+    },
+    "slurm": {
+      "enabled": true,
+      "pollMs": 300000,
+      "maxChecks": 288
+    }
+  },
+  "groups": {
+    "enabled": true,
+    "reviewer": {
+      "enabled": true,
+      "models": {
+        "claude": "haiku"
+      }
+    }
+  }
+}

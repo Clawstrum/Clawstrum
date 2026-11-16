@@ -1,0 +1,22 @@
+Clawstrum descends from NanoClaw.
+
+NanoClaw's inspected license:
+Copyright (c) 2026 Gavriel
+MIT License
+
+The original NanoClaw copyright and MIT permission notice are retained in
+LICENSE to acknowledge this lineage. Private conversations, credentials,
+research artifacts and deployment-specific files are not distributed.
+
+The optional research profile covers literature retrieval, citation checks,
+role-based subagents, preflight checks for cluster jobs, monitoring and
+compaction; see docs/research.md.
+
+templates/base-prompt-codex.md adapts a few tool-usage lines from the base
+instructions of OpenAI Codex (https://github.com/openai/codex), Copyright
+OpenAI, licensed under the Apache License 2.0
+(https://www.apache.org/licenses/LICENSE-2.0).
+
+Provider SDKs, their native runtimes, and other dependencies retain their
+respective licenses and service terms. Clawstrum's MIT license does not grant
+subscription access or provider branding rights.
