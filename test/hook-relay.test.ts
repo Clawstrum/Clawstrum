@@ -5,7 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { HookCallback, HookInput, Options } from '@anthropic-ai/claude-agent-sdk';
-import { claudeHookInput, geminiToolCall, runHooks, startHookRelay } from '../src/hook-relay.js';
+import {
+  applyPatchFiles,
+  claudeHookInput,
+  claudeHookInputs,
+  geminiToolCall,
+  runHooks,
+  startHookRelay,
+} from '../src/hook-relay.js';
 
 const client = path.resolve('src/hook-client.ts');
 
@@ -331,4 +338,120 @@ test('close stops the relay and removes the socket', async (t) => {
   assert.ok(fs.existsSync(relay.env.CLAWSTRUM_HOOK_SOCKET!));
   await relay.close();
   assert.ok(!fs.existsSync(relay.env.CLAWSTRUM_HOOK_SOCKET!));
+});
+
+const PATCH = [
+  '*** Begin Patch',
+  '*** Add File: /w/new.txt',
+  '+one',
+  '+two',
+  '*** Update File: /w/old.txt',
+  '*** Move to: /w/renamed.txt',
+  '@@',
+  ' keep',
+  '-gone',
+  '+came',
+  '*** Delete File: /w/dead.txt',
+  '*** End Patch',
+].join('\n');
+
+test('applyPatchFiles lists every file a Codex patch touches with its added and removed text', () => {
+  assert.deepEqual(applyPatchFiles(PATCH), [
+    { path: '/w/new.txt', kind: 'add', added: 'one\ntwo', removed: '' },
+    { path: '/w/old.txt', kind: 'update', added: 'came', removed: 'keep\ngone' },
+    { path: '/w/renamed.txt', kind: 'add', added: '', removed: '' },
+    { path: '/w/dead.txt', kind: 'delete', added: '', removed: '' },
+  ]);
+  assert.deepEqual(applyPatchFiles('not a patch'), []);
+});
+
+test('claudeHookInputs maps a Codex apply_patch to one Write or Edit per file and leaves other calls alone', () => {
+  const payload = {
+    hook_event_name: 'PreToolUse',
+    session_id: 's',
+    cwd: '/w',
+    tool_name: 'apply_patch',
+    tool_input: { command: PATCH },
+    tool_use_id: 'exec-1',
+  };
+  const inputs = claudeHookInputs('codex', payload) as any[];
+  assert.deepEqual(
+    inputs.map((i) => [i.tool_name, i.tool_input.file_path]),
+    [
+      ['Write', '/w/new.txt'],
+      ['Edit', '/w/old.txt'],
+      ['Write', '/w/renamed.txt'],
+      ['Write', '/w/dead.txt'],
+    ],
+  );
+  assert.equal(inputs[0].tool_input.content, 'one\ntwo');
+  assert.deepEqual(inputs[1].tool_input, {
+    file_path: '/w/old.txt',
+    old_string: 'keep\ngone',
+    new_string: 'came',
+  });
+  assert.ok(inputs.every((i) => i.hook_event_name === 'PreToolUse' && i.tool_use_id === 'exec-1'));
+  // A patch with no file header, a shell call and a Gemini payload stay one input.
+  assert.equal(claudeHookInputs('codex', { ...payload, tool_input: { command: 'x' } }).length, 1);
+  const shell = claudeHookInputs('codex', {
+    ...payload,
+    tool_name: 'Bash',
+    tool_input: { command: 'ls' },
+  });
+  assert.deepEqual(
+    shell.map((i: any) => i.tool_name),
+    ['Bash'],
+  );
+  assert.deepEqual(claudeHookInputs('codex', { nothing: true }), []);
+  assert.equal(
+    claudeHookInputs('gemini', geminiPre('run_command', { CommandLine: 'ls' })).length,
+    1,
+  );
+});
+
+test('codex relay: an apply_patch is refused when any one of its files is refused', async (t) => {
+  const dir = tempDir(t);
+  const seen: string[] = [];
+  const hooks: Options['hooks'] = {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            const i = input as any;
+            seen.push(`${i.tool_name}:${i.tool_input.file_path}`);
+            return i.tool_input.file_path === '/forbidden/b.txt'
+              ? deny('b is outside the allowed roots')
+              : {};
+          },
+        ],
+      },
+    ],
+  };
+  const relay = await startHookRelay({ hooks, format: 'codex', dir });
+  t.after(() => relay.close());
+  const patch = (...paths: string[]) => ({
+    hook_event_name: 'PreToolUse',
+    session_id: 's',
+    cwd: '/w',
+    tool_name: 'apply_patch',
+    tool_input: {
+      command: [
+        '*** Begin Patch',
+        ...paths.flatMap((p) => [`*** Add File: ${p}`, '+x']),
+        '*** End Patch',
+      ].join('\n'),
+    },
+  });
+  const refused = await runClient(
+    'codex',
+    patch('/w/a.txt', '/forbidden/b.txt', '/w/c.txt'),
+    relay.env,
+  );
+  assert.deepEqual(JSON.parse(refused.stdout), deny('b is outside the allowed roots'));
+  // The first refusal ends the check: c.txt was never looked at.
+  assert.deepEqual(seen, ['Write:/w/a.txt', 'Write:/forbidden/b.txt']);
+  seen.length = 0;
+  const allowed = await runClient('codex', patch('/w/a.txt', '/w/c.txt'), relay.env);
+  assert.equal(allowed.stdout, '');
+  assert.deepEqual(seen, ['Write:/w/a.txt', 'Write:/w/c.txt']);
 });

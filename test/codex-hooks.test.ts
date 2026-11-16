@@ -72,11 +72,12 @@ for await(const line of createInterface({input:process.stdin})) {
    notify('item/completed',{item:{type:'agentMessage',id:'answer',text,phase:'final_answer'}});
    notify('turn/completed',{turn:{id:'turn-live',status:'completed',error:null,items:[]}});
   };
-  if(mode==='run-hook'&&command) {
+  if(mode.startsWith('run-hook')&&command) {
    const child=spawn('sh',['-c',command],{stdio:['pipe','pipe','inherit']});
    let out='';child.stdout.on('data',d=>out+=d);
    child.on('close',()=>finish(out));
-   child.stdin.end(JSON.stringify({hook_event_name:'PreToolUse',tool_name:'Bash',tool_input:{command:'cat .env'},tool_use_id:'call-1',session_id:'thread-live',cwd:process.cwd()}));
+   const call=mode==='run-hook-patch'?{tool_name:'apply_patch',tool_input:{command:'*** Begin Patch\\n*** Add File: /var/lib/clawstrum-test-outside/x.txt\\n+x\\n*** End Patch'}}:{tool_name:'Bash',tool_input:{command:'cat .env'}};
+   child.stdin.end(JSON.stringify({hook_event_name:'PreToolUse',...call,tool_use_id:'call-1',session_id:'thread-live',cwd:process.cwd()}));
   } else finish('DONE');
  }
 }
@@ -258,4 +259,22 @@ test('Codex running the hook command reaches the research checks, which refuse c
   assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse');
   assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
   assert.ok(out.hookSpecificOutput.permissionDecisionReason.length > 0);
+});
+
+test('Codex running the hook command on an apply_patch outside the permitted roots is refused in strict mode', async (t) => {
+  const s = setup(t, 'run-hook-patch');
+  const final = await codexAppServerProvider.run(
+    s.request({ research: researchSchema.parse({ enabled: true, validation: 'strict' }) }),
+  );
+  const out = JSON.parse(final);
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(
+    out.hookSpecificOutput.permissionDecisionReason,
+    /clawstrum-test-outside\/x\.txt.*outside every permitted root/,
+  );
+});
+
+test('the same apply_patch is allowed (no output) when validation is advisory', async (t) => {
+  const s = setup(t, 'run-hook-patch');
+  assert.equal(await codexAppServerProvider.run(s.request()), '');
 });

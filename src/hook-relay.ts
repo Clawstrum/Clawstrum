@@ -96,6 +96,72 @@ export function claudeHookInput(format: HookFormat, payload: any): HookInput | u
     : { ...base, hook_event_name: 'PostToolUse', tool_response: '' };
 }
 
+/** The files a Codex apply_patch patch touches. `added` is the text it adds, `removed` the text it
+ * replaces (update only). A rename also lists the new path, with nothing added. */
+export function applyPatchFiles(
+  patch: string,
+): Array<{ path: string; kind: 'add' | 'update' | 'delete'; added: string; removed: string }> {
+  const files: Array<{
+    path: string;
+    kind: 'add' | 'update' | 'delete';
+    added: string[];
+    removed: string[];
+  }> = [];
+  let current: (typeof files)[number] | undefined;
+  for (const line of patch.split('\n')) {
+    const header = /^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);
+    const move = /^\*\*\* Move to: (.+)$/.exec(line);
+    if (header) {
+      current = {
+        path: header[2]!,
+        kind: header[1]!.toLowerCase() as 'add' | 'update' | 'delete',
+        added: [],
+        removed: [],
+      };
+      files.push(current);
+    } else if (move) {
+      // The hunks that follow still belong to the file being updated.
+      files.push({ path: move[1]!, kind: 'add', added: [], removed: [] });
+    } else if (current && line.startsWith('+')) current.added.push(line.slice(1));
+    else if (current && current.kind === 'update' && (line.startsWith('-') || line.startsWith(' ')))
+      current.removed.push(line.slice(1));
+  }
+  return files.map((f) => ({
+    ...f,
+    added: f.added.join('\n'),
+    removed: f.removed.join('\n'),
+  }));
+}
+
+/** Every Claude hook input a CLI hook payload stands for. A Codex apply_patch edits several files
+ * at once, and the research checks look at one path per Write or Edit call, so it becomes one
+ * input per file. Anything else is the single input claudeHookInput returns. */
+export function claudeHookInputs(format: HookFormat, payload: any): HookInput[] {
+  const base = claudeHookInput(format, payload);
+  if (!base) return [];
+  const patch = (payload as { tool_input?: { command?: unknown } }).tool_input?.command;
+  if (
+    format !== 'codex' ||
+    base.hook_event_name !== 'PreToolUse' ||
+    payload.tool_name !== 'apply_patch' ||
+    typeof patch !== 'string'
+  )
+    return [base];
+  const files = applyPatchFiles(patch);
+  if (!files.length) return [base];
+  return files.map(
+    (file) =>
+      ({
+        ...base,
+        tool_name: file.kind === 'update' ? 'Edit' : 'Write',
+        tool_input:
+          file.kind === 'update'
+            ? { file_path: file.path, old_string: file.removed, new_string: file.added }
+            : { file_path: file.path, content: file.added },
+      }) as HookInput,
+  );
+}
+
 // As in Claude Code: a plain name matches only that tool, `Edit|Write` either of them.
 function applies(matcher: HookCallbackMatcher, toolName: string): boolean {
   if (!matcher.matcher || matcher.matcher === '*') return true;
@@ -174,19 +240,26 @@ async function answer(
     HOOK_TIMEOUT_MS,
   );
   try {
-    const input = claudeHookInput(format, JSON.parse(line));
-    if (!input) return { output: allowForm(format) };
-    const toolUseId = (input as { tool_use_id?: string }).tool_use_id;
+    const inputs = claudeHookInputs(format, JSON.parse(line));
+    if (!inputs.length) return { output: allowForm(format) };
     const timedOut = new Promise<never>((_, reject) =>
       controller.signal.addEventListener('abort', () => reject(controller.signal.reason), {
         once: true,
       }),
     );
-    const result = await Promise.race([
-      runHooks(hooks, input, toolUseId, controller.signal),
-      timedOut,
-    ]);
-    return { output: relayOutput(format, input, result) };
+    let output: object | null = allowForm(format);
+    // The first refusal ends the call; otherwise the answer is the last input's.
+    for (const input of inputs) {
+      const toolUseId = (input as { tool_use_id?: string }).tool_use_id;
+      const result = await Promise.race([
+        runHooks(hooks, input, toolUseId, controller.signal),
+        timedOut,
+      ]);
+      output = relayOutput(format, input, result);
+      const specific = result.hookSpecificOutput as { permissionDecision?: string } | undefined;
+      if (specific?.permissionDecision === 'deny') break;
+    }
+    return { output };
   } catch (error) {
     // Only the message: the tool input can hold secrets.
     const message = error instanceof Error ? error.message : String(error);
