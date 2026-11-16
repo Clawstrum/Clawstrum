@@ -1,6 +1,6 @@
 # Research tools
 
-Claude, Codex and Gemini get tools for literature search, open-access papers, citation checks, research notes, subagents and Slurm jobs. On Claude, hooks also check tool calls. All of it is on by default, with advisory checks. `research.enabled: false` turns the tools off, and a feature's own `enabled: false` turns off that feature. [Memory](memory-lifecycle.md) doesn't depend on these settings.
+Claude, Codex and Gemini get tools for literature search, open-access papers, citation checks, research notes, subagents and Slurm jobs. Hooks also check tool calls. All of it is on by default, with advisory checks. `research.enabled: false` turns the tools off, and a feature's own `enabled: false` turns off that feature. [Memory](memory-lifecycle.md) doesn't depend on these settings.
 
 ## Setup
 
@@ -117,7 +117,7 @@ On each message you send, message recall ranks notes no longer in loaded memory 
 
 ## Checks
 
-On Claude, hooks check tool calls: citations and write locations in Write and Edit, writing rules for LaTeX files, raw `sbatch`, direct PDF fetches and Unpaywall calls without a contact. `research.validation` decides whether a finding is advice (`advisory`, the default) or refused (`strict`), or turns the checks off (`off`). See [hooks and gates](hooks-and-gates.md).
+Hooks check tool calls: citations and write locations in Write and Edit, writing rules for LaTeX files, raw `sbatch`, direct PDF fetches and Unpaywall calls without a contact. `research.validation` decides whether a finding is advice (`advisory`, the default) or refused (`strict`), or turns the checks off (`off`). Codex and Gemini get only refusals, so there the checks act only under `strict`, and fetches through their own web tools aren't checked. See [hooks and gates](hooks-and-gates.md).
 
 Native `Task`, `Agent` and `Workflow` calls go to `research_delegate` instead, and subagents may not delegate. `research.workers.enforceRoles` sets this: `deny` (default), `advise` or `off`. It applies only when roles are configured. `validation: off` turns this check off too, but [native delegation](orchestration.md#native-delegation) tools stay removed while `enforceRoles` is `deny`.
 
@@ -199,7 +199,7 @@ All fields are under `research`. Missing fields get their defaults.
 | `workers.enforceRoles`                | `deny`                | `deny`, `advise` or `off` for native delegation. Independent of `validation`                       |
 | `workers.review.artifact`             | `advise`              | `deny`, `advise` or `off` for a checker or reviewer without an artifact                            |
 | `workers.review.hold`                 | `off`                 | `once` holds one reply after a checker or reviewer result. Claude and Codex leads                  |
-| `workers.review.paperPush`            | `off`                 | `deny`, `advise` or `off` for paper pushes without a review. Claude leads only                     |
+| `workers.review.paperPush`            | `off`                 | `deny`, `advise` or `off` for paper pushes without a review. Any lead                              |
 | `workers.review.notesChars`           | `20000`               | Research state characters added to checker and reviewer prompts                                    |
 | `workers.critic.*`                    | unset                 | Old name for `workers.review.*`. `review` wins                                                     |
 | `slurm.enabled`                       | `true`                | Job tools. The Slurm commands must be installed                                                    |

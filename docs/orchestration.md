@@ -66,7 +66,7 @@ At most `workers.maxConcurrent` (20) subagents run at once. Each also takes a sl
 `research.workers.fileHolds` (default `true`) stops two running subagents from editing one file at once:
 
 - The first running subagent to edit a file with `Write`, `Edit`, `MultiEdit` or `NotebookEdit` holds it until it ends. The lead is never held.
-- On Claude, another subagent's edit of a held file is refused. On Codex it can't be refused, so the subagent is told and the overlap is flagged.
+- Another subagent's edit of a held file is refused.
 - Shell writes can't be checked. When a subagent ends, its wake lists the files it changed, including git changes under its `writePaths` by anyone, and flags files another subagent changed at the same time.
 
 ## Subagent context and files
@@ -126,14 +126,14 @@ Settings under `research.workers.review`:
 
 - `artifact` (`advise`) applies to a checker or reviewer without an existing `artifact` file. `advise` warns, `deny` refuses, `off` does nothing.
 - `hold` (`off`) set to `once` holds the first reply after a checker or reviewer result once, so the lead reads it before answering you. Interim results are never held. Works on Claude and Codex leads.
-- `paperPush` (`off`), on Claude leads only, checks the lead's `git push`. A push that changes a caption, heading, figure, abstract, number or image, or 800 or more characters, needs a checker or reviewer result since the first `.tex` edit. `deny` refuses (allowed after three refusals), `advise` warns. Subagent pushes are not checked.
+- `paperPush` (`off`) checks the lead's `git push`. A push that changes a caption, heading, figure, abstract, number or image, or 800 or more characters, needs a checker or reviewer result since the first `.tex` edit. `deny` refuses (allowed after three refusals), `advise` warns, on Gemini not at all. Subagent pushes are not checked.
 - `notesChars` (20000) appends that much of the channel's Research state to a checker's or reviewer's prompt, newest first. `0` leaves only the memory pointer.
 
 The older `research.workers.critic` block still works. `workers.review` wins when both are set.
 
 ## Native delegation
 
-With research on, roles configured and `research.workers.enforceRoles` at `deny` (the default), Clawstrum removes Claude's native Agent, Task, Workflow and team tools and turns off Codex's multi-agent features. `advise` or `off` lets the lead keep them. Subagents never get them. The shell can still start other agents, so this is not a security boundary.
+With research on, roles configured and `research.workers.enforceRoles` at `deny` (the default), Clawstrum removes Claude's native Agent, Task, Workflow and team tools, turns off Codex's multi-agent features and refuses Gemini's subagent, workflow and swarm tools. `advise` or `off` lets the lead keep them. Subagents never get them. The shell can still start other agents, so this is not a security boundary.
 
 ## Profiling
 
