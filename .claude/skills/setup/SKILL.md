@@ -13,7 +13,7 @@ You are helping someone install Clawstrum. They may have never used a terminal. 
 2. Plain words. Say "server", not "guild". When you must use a technical word, explain it in the same sentence.
 3. Check every step before the next one. Name the command you ran and say what it showed. Never say "should be fine".
 4. The user only does what needs a person: make a Discord account, make a server, use the bot page in the Discord developer portal (copy the token, turn on one switch), and click the invite link. Everything else you do or read from the machine.
-5. The bot token is a password for the bot: anyone who has it controls the bot. The safer way keeps it out of this chat: the user puts it into the file in a second terminal (step 2c), because this chat is saved on the model provider's servers and in local transcripts. The user may paste it here instead; then say once that the file is safer, and save it as step 2c shows. Either way, never repeat it, never print it, never write it anywhere but `.env`. Never read `.env` (no `cat`, `Read`, `grep` that prints it, no `env` or `printenv` without `| cut -d= -f1`). You only run checks that print yes or no.
+5. The bot token is a password for the bot: anyone who has it controls the bot. The safer way keeps it out of this chat: the user puts it into the file in a second terminal (step 2c), because this chat is saved on the model provider's servers and in local transcripts. The user may paste it here instead; then say once that the file is safer, and save it as step 2c shows. Either way, never repeat it, never print it, never put it in a shell command, never write it anywhere but `.env` (a pasted one passes through the one file step 2c names). Never read `.env` (no `cat`, `Read`, `grep` that prints it, no `env` or `printenv` without `| cut -d= -f1`). You only run checks that print yes or no.
 6. Do not use `sudo` unless the user agrees to that exact command. Fix problems yourself when you can (see the fixes below); only hand a step to the user when it needs their hands.
 7. If a command is blocked by your sandbox or permission prompt, say which command, and ask the user to approve it or to run it themselves in a normal terminal. Do not look for a way around it.
 8. Use placeholders below as `<LIKE_THIS>`. Fill them from real answers or command output, never from memory.
@@ -167,11 +167,15 @@ Then tell the user, one numbered list, and wait for "done":
 4. Still on the Bot page, click **Reset Token**, confirm, and **Copy** the token. It is shown only once.
 5. Put the token into the file. Safer, because the token never enters this chat: open a *second terminal* (not this chat) and run `nano -w "<HOME>/.env"` (use the real path; `-w` stops the editor from breaking the long line). Put the cursor right after `DISCORD_BOT_TOKEN=`, paste the token with no spaces and no quotes, keep it on that one line. Save with Ctrl+O then Enter, leave with Ctrl+X. (Nano is a small text editor that is on macOS and Linux. Any plain text editor works if the user prefers one.) Quicker: paste the token here and I save it; it then stays in this chat's records.
 
-If the user pasted the token, save it with this command, `<TOKEN>` being the pasted text without spaces or quotes. Do not repeat the token in your reply. If the user is asked to approve this command, they allow it once, not always: an always-allow rule can store the command, token included, in a settings file.
+If the user pasted the token, keep it out of every shell command: other users of the same machine can read a running command's full text. Do not repeat the token in your reply. Save it in three steps:
+
+1. Run `mkdir -p -m 700 "<HOME>/.paste"` (a folder only the user can open).
+2. With your file-writing tool, not a shell command, create `<HOME>/.paste/token` holding only the pasted text, without spaces or quotes.
+3. Move it into the token file. This command does not contain the token:
 
 ```sh
-H="<HOME>"; T='<TOKEN>'
-( umask 077; grep -v '^DISCORD_BOT_TOKEN=' "$H/.env" > "$H/.env.new"; printf 'DISCORD_BOT_TOKEN=%s\n' "$T" >> "$H/.env.new"; mv "$H/.env.new" "$H/.env" )
+H="<HOME>"
+( umask 077; T=$(tr -d ' \t\r\n' < "$H/.paste/token"); rm -f "$H/.paste/token"; rmdir "$H/.paste"; grep -v '^DISCORD_BOT_TOKEN=' "$H/.env" > "$H/.env.new"; printf 'DISCORD_BOT_TOKEN=%s\n' "$T" >> "$H/.env.new"; mv "$H/.env.new" "$H/.env" )
 ```
 
 Check without printing anything secret:
