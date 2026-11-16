@@ -6,15 +6,15 @@ Clawstrum checks what the agent writes and reviews each outgoing reply once befo
 
 `research.validation` sets how content checks act.
 
-| Mode       | Effect                                                                                         |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| `advisory` | Default. Findings are recorded and returned to the agent. Nothing is refused.                  |
-| `strict`   | The first problem is refused or held once, so the agent can fix it. Later findings are advice. |
-| `off`      | Turns off every tool-call check, including subagent routing, and the outgoing reply review.    |
+| Mode       | Effect                                                                                                                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `advisory` | Default. Findings are recorded and returned to the agent. Nothing is refused.                                                                                                         |
+| `strict`   | Findings are refused or held as each check below says.                                                                                                                                |
+| `off`      | Turns off the content checks, subagent routing and the outgoing reply review. The secret-file block, paper push gate, subagent file holds and the restore after compaction still run. |
 
 ## Tool-call checks
 
-These run as hooks before each tool call, so they exist only on Claude runs. Codex and Gemini edits are not checked. Findings are saved as `research_validation` events. The agent sees at most ten.
+These run as hooks before each tool call, so they exist only on Claude runs. Codex and Gemini edits are not checked. Findings are saved as `research_validation` events. The agent sees at most ten findings per call.
 
 - A Write or Edit to a `.md`, `.markdown`, `.tex`, `.bib` or `.rst` file is checked for author and year pairs that disagree with the saved record of the DOI or arXiv ID next to them. An Edit only reports problems it introduces. In strict mode, the first citation finding per run and agent refuses the write once.
 - A Write or Edit outside the channel folder, the Clawstrum home, the system temp folder and `research.writeRoots` is reported. In strict mode it is refused every time.
@@ -25,7 +25,17 @@ These run as hooks before each tool call, so they exist only on Claude runs. Cod
 
 The citation check reads only saved Crossref, DataCite and arXiv records. It recognizes forms such as `Doe (2024)`, `Doe et al. (2024)`, `(Doe, 2024)` and plain BibTeX fields, and allows a one-year difference. Ambiguous pairings, TeX-encoded fields and code fences are skipped. A clean result means no detected mismatch, not that every citation is right.
 
-Both providers can scan any text or file with `research_citation action=scan` and exactly one of `text` or `path`, up to 2,000,000 bytes.
+Every provider can scan any text or file with `research_citation action=scan` and exactly one of `text` or `path`, up to 2,000,000 bytes.
+
+## Secret files
+
+On Claude runs with `research.enabled` on, a hook refuses a tool call that would print a secret file, in every validation mode, and logs `secret_print_blocked`. It covers:
+
+- a Read of `.env` or `.env.*`, `.bashrc`, `.bash_profile`, `.profile`, `.zshrc`, `.netrc`, `.pgpass`, `.aws/credentials`, `.git-credentials`, `credentials.json`, `.config/gh/hosts.yml`, or a file named `secret` or `secrets` with the extension `.env`, `.json`, `.yaml`, `.yml` or `.txt`
+- a shell command where `cat`, `less`, `head`, `tail`, `grep`, `sed`, `awk` or a similar reader names one of these files
+- `env`, `printenv`, `export -p` and `declare -x`
+
+Commands that reduce the output to names, counts or masked values pass, for example `| cut -d= -f1`, `| wc` or `grep -c`. The hook knows only these patterns: `python3 -c "print(open('.env').read())"`, reading a copy under another name, or `source .env; echo $KEY` get through.
 
 ## Subagent routing
 
@@ -62,4 +72,4 @@ After Claude compacts its context, the next session start restores the channel's
 
 ## Cost
 
-None of these checks calls a model, except the one strict correction of a final reply. Saved evidence states are shown as last observed. `research_status collection=notes refresh=true` rechecks them all.
+None of these checks calls a model, except the one strict correction of a final reply.

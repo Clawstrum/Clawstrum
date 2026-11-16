@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/workflow.png" width="600" alt="Your messages in Discord and events from your code, cluster and the web pass through Clawstrum to Claude Code, Codex or Gemini. Clawstrum improves over time and can keep the agent working while you are away.">
+  <img src="docs/images/workflow.png" width="600" alt="You, in Discord, and the environment (code, cluster, web) connect through Clawstrum, the outer harness, to Claude Code, Codex or Gemini, the inner harness around the LLM. A green loop marks (self-)improvement and a blue loop working alone.">
 </p>
 
 Clawstrum runs Claude Code, Codex or Gemini as an agent you talk to in Discord, one channel per project. It drives them through their SDKs and the Agent Client Protocol (ACP). It runs on a machine you choose, such as a laptop, a server or a cluster login node, with full shell, file and network access. It messages you when a job ends, keeps each project's memory in plain files, and changes its own instructions and code when you tell it what went wrong.
@@ -35,7 +35,7 @@ To install without an agent, see [setup](docs/setup.md).
 
 Open the `main` channel. The agent writes first and asks about your field, your projects and how you like answers. Each project gets its own channel. It also offers voice notes and a few optional keys, and saves nothing until you agree. Later, `main` is where you tell the agent what to change about itself.
 
-## How it works
+## Features
 
 <p align="center">
   <img src="docs/images/inside.png" width="640" alt="Inside one run: your message goes to a router that picks a skill, then to Claude Code, Codex or Gemini. The agent reads and edits its memory and skills. On Claude runs, hooks check each tool call before it runs.">
@@ -63,7 +63,7 @@ Every message the agent accepts runs with full access to the machine.
 
 - Run Clawstrum as its own user, on a server or cluster account set aside for it.
 - Text the agent reads, such as a web page or another bot's message, can carry instructions that it may follow.
-- On Claude runs, a hook blocks common commands that print a secret file such as `.env` or the whole environment. It only catches known patterns, and it is off when `research.enabled` is false. Codex and Gemini runs don't have it yet.
+- On Claude runs, a hook blocks common commands that print a secret file such as `.env` or the whole environment. It only catches known patterns, and it is off when `research.enabled` is false. Codex and Gemini runs don't have it yet. See [secret files](docs/hooks-and-gates.md#secret-files).
 - `send_file` refuses Clawstrum's keys, logins, history and database, home dotfiles and secret files such as `.env`, on every provider. A copy under another name still goes out.
 
 ## Commands

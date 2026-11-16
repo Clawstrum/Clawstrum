@@ -13,7 +13,7 @@ npm run format:check
 npm run test:package
 ```
 
-`npm run check` type-checks and runs the test suite. It covers state and recovery, account and model routing, cancellation, research tools, hooks, gates, live steering, restarts and the SDK protocols. It uses local fixtures and fake providers, with no Discord or provider login and no model calls. `npm run test:package` installs the package archive into a fresh directory with production dependencies and runs the installed CLI, MCP server and workflow commands.
+`npm run check` type-checks and runs the test suite. It covers state and recovery, account and model routing, cancellation, research tools, hooks, gates, live steering, restarts and the SDK protocols. It uses local fixtures and fake providers, with no Discord or provider login and no model calls, and removes Jev and OpenRouter keys from its environment. `npm run test:package` installs the package archive into a fresh directory with production dependencies and runs the installed CLI, MCP server and workflow commands.
 
 CI runs these on Linux and macOS with Node 22 and 24, for pull requests, pushes to `main` and manual runs. A newer push cancels the older run for the same branch. Run the checks locally, then push once.
 

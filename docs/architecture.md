@@ -80,7 +80,7 @@ See [workflows](workflows.md) for watches, [operations](operations.md#planned-re
 
 ## Limits
 
-- Discord is the only channel, and the agent has full access to the host. There is no permission gate and no required skill policy.
+- Discord is the only channel, and the agent has full access to the host. There is no permission gate, and skills are never forced on the agent.
 - External actions, detached jobs and Discord sends can't share a transaction with SQLite, so they are not exactly-once.
 - Naming a native subagent after a research role doesn't apply that role's model or limits. On Claude, with roles configured and `research.workers.enforceRoles` at its default `deny`, native subagent requests are refused and sent to `research_delegate`. See [subagent routing](hooks-and-gates.md#subagent-routing).
 - Hidden provider state doesn't move between accounts.
@@ -89,7 +89,7 @@ All settings are in the [configuration reference](configuration.md).
 
 ## Research
 
-The daemon also runs research subagents and a Slurm monitor next to the main queue, sharing account capacity. See [research](research.md).
+The daemon also runs research subagents and a Slurm monitor next to the main queue, sharing account capacity. Clawstrum's tools, the research tools included, work on all three providers. Hooks run on Claude only. See [research](research.md).
 
 ## Channel groups
 

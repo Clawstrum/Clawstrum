@@ -36,7 +36,7 @@ You can edit the files by hand. Clawstrum saves each version it has seen before 
 | History access and coverage | Where the history is and how far consolidation has read it                       |
 | Last compaction summary     | The latest compaction summary, until a pass merges it and leaves a one-line note |
 
-A corrected decision replaces the old one. The old reasoning stays in history.
+Decisions you state in a channel, such as "from now on ..." or "use my ...", are saved word for word into its Research state section, and the agent applies them before older notes. A corrected decision replaces the old one. The old reasoning stays in history.
 
 ## Agent tools
 
@@ -55,13 +55,13 @@ Clawstrum records every message, tool result and memory revision the provider sh
 
 Three passes keep memory in step with the history. They run on your subscription, start only when the channel is idle and stop when a new message arrives. Finished chunks are kept.
 
-- Memory review runs after a burst of activity, at most every five minutes. It fixes memory lines and standing instructions that the new history contradicts, and marks replaced notes.
+- Memory review runs after a burst of activity, at most every five minutes per channel and within the call limits below. It fixes memory lines and standing instructions that the new history contradicts, and marks replaced notes.
 - Daily consolidation runs once a day, at the first idle moment after 4:00 local time by default, for each channel with new history and once for the shared file. It rereads the new conversation, notes and claims (not raw tool output), writes what it learned as dated rules under `#### Reusable knowledge`, and keeps the rest of the memory section complete. It never deletes a line only to save space. For a channel with a large backlog it reads only the newest 8 chunks and records the skipped range, which stays in history.
 - A compaction merge runs after Claude Code or Codex shortens its own context. Afterwards Clawstrum gives the agent its current instructions and memory again. On Claude, it archives the transcript first and puts the compaction summary into `### Last compaction summary`. At the next idle moment the merge folds it into the other sections, and the next turn starts a fresh session from `AGENTS.md`. Codex gives no summary text, so there the merge reads the new history instead.
 
 Every proposal is checked before it is written: each change must cite a history record, open jobs and file paths in Current work can't disappear without a record that resolves them, and the file must still be at the revision the pass read. A rejected proposal gets two retries. After three rejected passes at the same point, passes pause for six hours, doubling up to 24.
 
-A finished consolidation logs a `consolidation_completed` event and a deferred or failed one logs `consolidation_deferred`, so you can check that it runs.
+To check that the passes run: a finished consolidation logs `consolidation_completed` and a deferred or failed one `consolidation_deferred`. Memory review logs `memory_review_completed` or `memory_review_deferred`. A rejected proposal logs `consolidation_rejected` or `memory_review_rejected`.
 
 ## Call limits
 
@@ -69,6 +69,7 @@ A finished consolidation logs a `consolidation_completed` event and a deferred o
 - 6 of those 24 are kept for compaction merges, which go first and skip the 30-minute wait.
 - The daily pass has its own 120 calls per 24 hours and no wait.
 - All passes run one at a time.
+- The limits count calls, not tokens. One large pass can still use a lot of quota.
 
 `clawstrum maintenance status` shows what is used and when the next call can start. To stop all background passes, set `runtime.maintenance.maxCallsPerDay` and `runtime.consolidation.daily.maxCallsPerDay` to 0. History and compaction handling keep working.
 

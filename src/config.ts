@@ -383,7 +383,7 @@ export function normalizeConfig(home: string, value: unknown): Config {
 }
 /**
  * Copy the channel list from config.json into a running config, in place, so every holder of the
- * object sees the new list. Only discord.channelIds changes live; other edits still need a restart.
+ * object sees the new list. Accounts reload in accountsReloader; other edits need a restart.
  * Returns the added and removed channel IDs. An invalid file throws and leaves the config unchanged.
  */
 export function reloadChannelIds(

@@ -1,6 +1,6 @@
 # Research tools
 
-Claude and Codex get tools for literature search, open-access papers, citation checks, research notes, subagents and Slurm jobs. On Claude, hooks also check tool calls. All of it is on by default, with advisory checks. `research.enabled: false` turns the tools off, and a feature's own `enabled: false` turns off that feature. [Memory](memory-lifecycle.md) doesn't depend on these settings.
+Claude, Codex and Gemini get tools for literature search, open-access papers, citation checks, research notes, subagents and Slurm jobs. On Claude, hooks also check tool calls. All of it is on by default, with advisory checks. `research.enabled: false` turns the tools off, and a feature's own `enabled: false` turns off that feature. [Memory](memory-lifecycle.md) doesn't depend on these settings.
 
 ## Setup
 
@@ -25,17 +25,17 @@ clawstrum research status SESSION --input status.json
 
 ## Tools
 
-| Tool                | Input                                                                                                                                                                                                      | Result                                                                              |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `research_search`   | `q`, `kw` (one or more), optional `ctx`, `para`, `seeds`, `exclude`, `from`/`to`, `k` (default 30), `hops` (0 to 2, default 2), `grader` (`auto`, `jev`, `bm25`)                                           | Top `k` papers, with every candidate in a saved file                                |
-| `research_paper`    | `id`: DOI, arXiv ID or version, PMID, PMCID, OpenReview or OSF ID, or URL. `refresh=true` skips the cache                                                                                                  | Document, extracted text, manifest of sources, versions, hashes and failed attempts |
-| `research_citation` | `action=verify`, `check` or `get` with `id`. `check` takes `title`, `authors`, `year`, `quote`, `textPath`. `action=scan` with `text` or `path`                                                            | Citation record and source response, or a list of discrepancies                     |
-| `research_note`     | `kind` (`finding`, `decision`, `method`, `question`), `title`, `body`, `key`, optional `evidence`, `supersedes`, `claim`                                                                                   | Note in history and in memory's Research state                                      |
-| `research_manifest` | Files and parameters of a run or deployment, to record or verify                                                                                                                                           | Content hashes, or a check against current files                                    |
-| `research_delegate` | `role`, `brief`, `key`, `context` and more, see [subagents](orchestration.md)                                                                                                                              | Subagent id. The lead is woken with the result                                      |
-| `research_steer`    | Subagent `id`, `message`, `key`                                                                                                                                                                            | Delivery state                                                                      |
-| `research_cluster`  | `action=preflight`, `submit`, `watch`, `adopt` or `stop-watch`                                                                                                                                             | Saved script, preflight report, submission state, scheduler observations            |
-| `research_status`   | `collection=notes`, `subagents`, `jobs`, `citations`, `usage`, `subagent-profile` or `maintenance`, optional `id`, `limit` (1 to 100, default 20), `offset`. Notes also take `refresh`, `query`, `current` | Records, one page at a time. `cancelWorker=true` with an `id` cancels a subagent    |
+| Tool                | Input                                                                                                                                                                                                                                    | Result                                                                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `research_search`   | `q`, `kw` (one or more), optional `ctx`, `para`, `seeds`, `exclude`, `from`/`to`, `k` (default 30), `hops` (0 to 2, default 2), `grader` (`auto`, `jev`, `bm25`), `gradeFrac` (share of candidates Jev scores, default 0.5)              | Top `k` papers, with every candidate in a saved file                                |
+| `research_paper`    | `id`: DOI, arXiv ID or version, PMID, PMCID, OpenReview or OSF ID, or URL. `refresh=true` skips the cache                                                                                                                                | Document, extracted text, manifest of sources, versions, hashes and failed attempts |
+| `research_citation` | `action=verify`, `check` or `get` with `id`. `check` takes `title`, `authors`, `year`, `quote`, `textPath`. `action=scan` with `text` or `path`                                                                                          | Citation record and source response, or a list of discrepancies                     |
+| `research_note`     | `kind` (`finding`, `decision`, `method`, `question`), `title`, `body`, `key`, optional `evidence`, `supersedes`, `claim`                                                                                                                 | Note in history and in memory's Research state                                      |
+| `research_manifest` | Files and parameters of a run or deployment, to record or verify                                                                                                                                                                         | Content hashes, or a check against current files                                    |
+| `research_delegate` | `role`, `brief`, `key`, `context` and more, see [subagents](orchestration.md)                                                                                                                                                            | Subagent id. The lead is woken with the result                                      |
+| `research_steer`    | Subagent `id`, `message`, `key`                                                                                                                                                                                                          | Delivery state                                                                      |
+| `research_cluster`  | `action=preflight`, `submit`, `watch`, `adopt` or `stop-watch`                                                                                                                                                                           | Saved script, preflight report, submission state, scheduler observations            |
+| `research_status`   | `collection=notes`, `subagents`, `jobs`, `citations`, `usage`, `usage-profile`, `subagent-profile`, `decisions` or `maintenance`, optional `id`, `limit` (1 to 100, default 20), `offset`. Notes also take `refresh`, `query`, `current` | Records, one page at a time. `cancelWorker=true` with an `id` cancels a subagent    |
 
 `workers` and `worker-profile` work as collection names too. Subagents don't get delegation, steering, result review or the lead's Discord tools, but keep full shell access. A tool result over 12,000 characters is saved to a file, and the agent gets an excerpt and the path.
 
@@ -43,9 +43,9 @@ clawstrum research status SESSION --input status.json
 
 `research_search` runs OpenAlex keyword search per `kw`, OpenAlex semantic search for `q` and each `para` (once as is and once limited to the last two years), and arXiv search on the first three `kw` for the last 18 months. When the year-limited semantic search fails, about a third of the time, a keyword search replaces it without a warning. `seeds` (DOI, arXiv ID or OpenAlex W-ID) are always candidates. `exclude` (IDs or exact titles) never are.
 
-Jev scores each candidate by how directly it addresses the question. Give three or four lines on the project as `ctx`, or ranking gets worse. Calls run up to `decisions.maxConcurrent` at once (at most 24), with 20 s and three attempts per paper. Without a working Jev key or budget, the run ranks by bm25 (word overlap). If Jev fails mid-run (all of the first 12 calls, 8 papers in a row, or more than 25 % once 20 or more are graded), the whole run is re-ranked by bm25. `fallback` gives the reason.
+Jev scores how directly each candidate addresses the question. It scores only the top half by word overlap and search rank (`gradeFrac`), and the rest rank after them. Give three or four lines on the project as `ctx`, or ranking gets worse. Calls run up to `decisions.maxConcurrent` at once (at most 24), with 20 s and three attempts per paper. Without a working Jev key or budget, the run ranks by bm25 (word overlap). If Jev fails mid-run (all of the first 12 calls, 8 papers in a row, or more than 25 % once 20 or more are graded), the whole run is re-ranked by bm25. `fallback` gives the reason.
 
-Each hop then adds the references and the 25 most-cited and 25 newest citing papers of up to five papers scored 0.5 or more (plus the seeds in hop 1). A second hop runs only if the first put two new papers in the top `k`. A run stops after 240 s or $0.10 of OpenAlex spend. The full result goes to `research/searches/` in the Clawstrum home.
+Each hop then adds the references and the 25 most-cited and 25 newest citing papers of up to five papers scored 0.5 or more (plus the seeds in hop 1). A second hop runs only if the first put two new papers in the top `k`. With bm25 there is one hop, from the top 3. A run stops after 240 s or $0.10 of OpenAlex spend. The full result goes to `research/searches/` in the Clawstrum home.
 
 The OpenAlex key comes from the variable named by `research.openalexKeyEnv`. Without it the search warns and runs unauthenticated. `research.email` is sent to OpenAlex and Crossref.
 
@@ -111,9 +111,9 @@ Each lead run gets a list of the channel's current notes (`- <date> <title> (id 
 
 ## Recall
 
-On Claude, when the lead calls `Grep`, `Glob`, `WebSearch` or `research_delegate`, a hook searches the conversation's history for records sharing two or more of the search terms, and returns up to `recall.maxHits` excerpts with record ids, at most `recall.maxNotices` times per run. It never blocks a call and doesn't run in subagents or on Codex. `clawstrum history index` indexes older records.
+On Claude, when the lead calls `Grep`, `Glob`, `WebSearch` or `research_delegate`, a hook searches the conversation's history for records sharing two or more of the search terms, and returns up to `recall.maxHits` excerpts with record ids, at most `recall.maxNotices` times per run. It never blocks a call and doesn't run in subagents or on Codex and Gemini. Recalls are logged as `research_recall` events. `clawstrum history index` indexes older records.
 
-On each message you send, on Claude and Codex, message recall ranks notes no longer in loaded memory against it, asks Jev about the best `messageRecall.candidates`, and pastes up to `messageRecall.maxNotes` scoring at least `messageRecall.threshold` (1,500 characters each, 4,000 in total). Without a Jev key it does nothing.
+On each message you send, message recall ranks notes no longer in loaded memory against it, asks Jev about the best `messageRecall.candidates`, and pastes up to `messageRecall.maxNotes` scoring at least `messageRecall.threshold` (1,500 characters each, 4,000 in total). Without a Jev key it does nothing. It logs `research_message_recall` events.
 
 ## Checks
 
@@ -138,7 +138,7 @@ On every provider, outgoing messages and prose attachments are checked for citat
 | `totalTokens`      | Provider total, or the sum of observed fields, which is then a lower bound |
 | `estimatedCostUsd` | The provider's own estimate. `null` on Codex                               |
 
-A missing field means unknown, not zero, and `reportedTotals` sums only observed values. Model calls from programs the agent starts itself are not counted. These are estimates, not subscription bills.
+A missing field means unknown, not zero, and `reportedTotals` sums only observed values. Model calls from programs the agent starts itself are not counted.
 
 ## Background tasks
 

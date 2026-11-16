@@ -48,7 +48,7 @@ If your message stays queued for two minutes while the provider has been silent 
 
 `runtime.queuedInputTimeoutMs` sets the wait (default 120000). 0 turns it off. The events `live_input_rejected` and `queued_input_handoff` record these cases without message content.
 
-Memory reviews, compaction merges and group reviews share 24 model calls per rolling 24 hours, at least 30 minutes apart. In `clawstrum maintenance status`, `remaining` can be above zero while `available` is false, because the 30-minute wait holds the next call. See [memory call limits](memory-lifecycle.md#call-limits).
+In `clawstrum maintenance status`, `remaining` can be above zero while `available` is false, because background calls start at least 30 minutes apart. See [memory call limits](memory-lifecycle.md#call-limits).
 
 ## Usage report
 
@@ -61,7 +61,7 @@ clawstrum usage profile SESSION --day yesterday --timezone America/New_York
 
 By default it covers the last 24 hours, in JSON. `--day` takes an ISO date, `today` or `yesterday`. The time zone defaults to `runtime.timezone`, then the machine's.
 
-The report compares the channel agents with each configured research subagent (including `critic`), consolidation, memory review, group review and each Jev decision feature. For each it shows calls, fresh input, cache writes, cache reads, output, total tokens, estimated cost, missing counters, and shares of the total and of the lead. Unused roles show zero calls. Failed calls without counters show unknown usage, not zero.
+The report compares the channel agents with each configured research subagent (including `checker` and `reviewer`), consolidation, memory review, group review and each Jev decision feature. For each it shows calls, fresh input, cache writes, cache reads, output, total tokens, estimated cost, missing counters, and shares of the total and of the lead. Unused roles show zero calls. Failed calls without counters show unknown usage, not zero.
 
 - Token shares are not subscription quota, and cost estimates are not bills.
 - On resumed Claude sessions some internal calls go unreported, so totals can be lower bounds. `accountingSources` shows how each call was counted.

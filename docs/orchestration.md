@@ -1,6 +1,6 @@
 # Subagents
 
-In each channel one lead agent keeps the project picture and writes the answers. On Claude and Codex it hands bounded tasks, such as reading, analysis, a code change or a check, to subagents. Only the lead delegates. Subagents can't start subagents or post to Discord.
+In each channel one lead agent keeps the project picture and writes the answers. It hands bounded tasks, such as reading, analysis, a code change or a check, to subagents. Only the lead delegates. Subagents can't start subagents or post to Discord.
 
 ## Delegation policy
 
@@ -26,7 +26,7 @@ The lead calls `research_delegate`. The same `key` returns the same subagent ins
 
 - `context` says what the work is for and any constraint you stated. Under 40 characters is refused unless `research.workers.requireContext` is `false`.
 - `research.workers.briefContext` (on by default) adds the channel's goal from memory (or your saved decisions) and the last 40 messages from both sides to every `BRIEF.md`. Limits are in the [configuration reference](research.md#configuration-reference).
-- `provider`, `model` and `effort` override the role for one task. A model needs its provider. If no account can take it, the request waits. Clawstrum never swaps in another model or provider.
+- `provider`, `model` and `effort` override the role for one task. A model needs its provider. If no account can take it, the request waits. Clawstrum never swaps in another model or provider, and subagents don't use the lead's `modelFallbacks`.
 - `artifact` names the file a checker or reviewer judges (see below).
 - `resumeFrom` continues an ended subagent (see [Steering and continuing subagents](#steering-and-continuing-subagents)).
 

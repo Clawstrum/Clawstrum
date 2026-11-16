@@ -1,6 +1,6 @@
 # Subscriptions
 
-Clawstrum is designed for coding agents' SDKs and the Agent Client Protocol (ACP): Claude runs through the Claude Agent SDK, Codex through the Codex SDK and app server, and Gemini through Antigravity CLI over ACP, each on the user's own sign-in. It does not silently switch to API billing, and it does not require an OpenAI API key for Codex.
+Claude runs through the Claude Agent SDK, Codex through the Codex SDK and app server, and Gemini through Antigravity CLI over the Agent Client Protocol (ACP), each on your own sign-in. Clawstrum never switches to API billing.
 
 Claude uses your Claude login through the bundled Claude Code runtime. Codex uses ChatGPT subscription login, which Clawstrum forces, with a separate `CODEX_HOME` per account ([Codex authentication](https://learn.chatgpt.com/docs/auth)). Gemini uses your Google login ([Gemini](#gemini)).
 

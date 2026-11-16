@@ -97,7 +97,7 @@ import {
   type DashboardStamps,
 } from './dashboard.js';
 
-const HELP = `Clawstrum 0.1.0 — autonomous agents, at home in Discord
+const HELP = `Clawstrum 0.1.0
 
 clawstrum setup                  Guided first-time setup: Discord bot, token, IDs, login
 clawstrum --version              Print the version

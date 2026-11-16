@@ -15,7 +15,7 @@ clawstrum group board SESSION_ID --input publication.json
 clawstrum history SESSION_ID --group lab --action search --query "baseline"
 ```
 
-`clawstrum status` lists session IDs. Membership follows the Discord channel ID, so renames, account switches and new provider sessions don't change it. Leaving a parent channel removes its threads' inherited membership. An explicit join or leave on a thread overrides what it inherits. `group status` also shows the reviewer's usage, paged with `--limit` and `--offset`. Its costs are provider estimates, not subscription charges.
+`clawstrum status` lists session IDs. Membership follows the Discord channel ID, so renames, account switches and new provider sessions don't change it. Leaving a parent channel removes its threads' inherited membership. An explicit join or leave on a thread overrides what it inherits. `group status` also shows the reviewer's usage, paged with `--limit` and `--offset`.
 
 ## Files
 
@@ -98,7 +98,7 @@ Default settings:
 }
 ```
 
-- It runs on your subscription with the lead's accounts, but never on the lead's model. On Claude it uses `haiku`. A Codex-only install must set `groups.reviewer.models.codex` to a small model its subscription offers.
+- It runs on your subscription with the lead's accounts, but never on the lead's model. On Claude it uses `haiku`. A Codex-only or Gemini-only install must set `groups.reviewer.models.codex` or `.gemini` to a small model its subscription offers.
 - Without a usable account, publishing and sharing go on, and the board shows why review is pending. There is no fallback to paid API calls.
 - Group reviews share the background call limit with memory passes, see [call limits](memory-lifecycle.md#call-limits).
 - It reads the board, open issues, group instructions and every change since its last review, in chunks of `chunkChars`. It applies its plan only if the board hasn't changed meanwhile. Otherwise the next pass starts over.

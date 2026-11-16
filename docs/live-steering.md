@@ -9,10 +9,11 @@ Steering is on for every Claude and Codex lead run, including scheduled and reco
 - The provider decides when it reads the new message. Steering doesn't interrupt a running shell command, and the model may finish its current step first.
 - A message sent after the agent's final reply still joins the run, as long as the run is alive, for example while a long experiment continues in the background. The agent then owes a new answer, and an earlier reply can't count as one.
 - Claude can fold several messages into one turn and answer them together. Messages that already got separate Discord replies can't be merged afterward.
-- The message gets a small Discord reaction when it is accepted. Accepted means the provider took it, not that the model acted on it. The agent is instructed to send one short line on what it will do next before starting work. That line comes from the agent's normal turn, so it appears only once the model reads the message. The rule lives in the shared `AGENTS.md`.
+- Clawstrum reacts to the message as soon as it saves it: 📨 if the agent is working, 👀 if not. The reaction doesn't mean the provider has taken it yet. The agent is instructed to send one short line on what it will do next before starting work. That line comes from the agent's normal turn, so it appears only once the model reads the message. The rule lives in the shared `AGENTS.md`.
 
 ## Limits
 
+- While you type, Clawstrum waits up to a ceiling before it passes the message on, as it does before a turn starts.
 - Each injection carries at most 20 messages, each with its ID, author, send time in `runtime.timezone` and full text. The whole batch must fit in `runtime.promptChars` (default 100,000 characters). A first message too long for that waits for the next run instead of being cut.
 - A message queued behind an older retry, a retry batch or a message with a file waits too. Later text can't jump ahead of it.
 - A correction sent before the final reply runs under the current run's time limit. A new request accepted after the final reply gets a fresh time limit.

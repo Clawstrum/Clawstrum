@@ -4,20 +4,21 @@ You can make every change below by hand, or ask the agent in any channel: "add m
 
 `H` is `$CLAWSTRUM_HOME` (default `~/.clawstrum`). `W` is a conversation's workspace, `H/channels/<discord-channel-id>/`.
 
-| To change                           | Edit                                                                    | Takes effect                                 |
-| ----------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
-| Behavior in every channel           | `H/AGENTS.md`                                                           | Live, at the next input or tool              |
-| Behavior in one channel             | `W/AGENTS.md`                                                           | Live                                         |
-| A reusable procedure                | `H/skills/<name>/SKILL.md` (all channels) or `W/skills/<name>/SKILL.md` | Next turn                                    |
-| Writing rules for research prose    | `WRITING.md` in `H` or `W`                                              | Next check                                   |
-| Your own tools                      | `mcpServers` in `H/config.json`                                         | After a restart                              |
-| Hooks (Claude turns only)           | `W/.claude/settings.json`, or `settings.json` in a Claude account home  | Next turn                                    |
-| Accounts, routing, limits, channels | `H/config.json`                                                         | After a restart                              |
-| Clawstrum's own code                | `src/` in a source checkout, then `clawstrum apply`                     | After the restart `apply` requests           |
-| Voice notes to text                 | `voice` in `H/config.json`, names in `voice-words.txt`                  | After a restart; word lists at the next note |
-| Working alone while you are away    | `workAlone` in `H/config.json`                                          | After a restart                              |
-| Worker shell sandbox                | `sandbox` in `H/config.json`                                            | After a restart                              |
-| Self-review schedule                | `review` in `H/config.json`, set by `clawstrum review schedule`         | After a restart                              |
+| To change                        | Edit                                                                    | Takes effect                                 |
+| -------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
+| Behavior in every channel        | `H/AGENTS.md`                                                           | Live, at the next input or tool              |
+| Behavior in one channel          | `W/AGENTS.md`                                                           | Live                                         |
+| A reusable procedure             | `H/skills/<name>/SKILL.md` (all channels) or `W/skills/<name>/SKILL.md` | Next turn                                    |
+| Writing rules for research prose | `WRITING.md` in `H` or `W`                                              | Next check                                   |
+| Your own tools                   | `mcpServers` in `H/config.json`                                         | After a restart                              |
+| Hooks (Claude turns only)        | `W/.claude/settings.json`, or `settings.json` in a Claude account home  | Next turn                                    |
+| Accounts and the channel list    | `accounts`, `discord.channelIds` in `H/config.json`                     | Within a few seconds                         |
+| Routing and limits               | `H/config.json`                                                         | After a restart                              |
+| Clawstrum's own code             | `src/` in a source checkout, then `clawstrum apply`                     | After the restart `apply` requests           |
+| Voice notes to text              | `voice` in `H/config.json`, names in `voice-words.txt`                  | After a restart; word lists at the next note |
+| Working alone while you are away | `workAlone` in `H/config.json`                                          | After a restart                              |
+| Worker shell sandbox             | `sandbox` in `H/config.json`                                            | After a restart                              |
+| Self-review schedule             | `review` in `H/config.json`, set by `clawstrum review schedule`         | After a restart                              |
 
 Start with the smallest scope that does the job: one channel before all channels, instructions or a skill before configuration, configuration before code. See [instruction files](instructions.md) for how the `AGENTS.md` files combine.
 
@@ -48,7 +49,7 @@ npm link
 clawstrum init
 ```
 
-An `npm pack` archive holds only `dist/`. The rest of this page works with it, but code changes don't.
+An `npm pack` archive has the build but no `src/`. The rest of this page works with it, but code changes don't.
 
 After editing `src/`, run `clawstrum apply`. It type-checks, builds and tests a temporary copy, so a failure changes nothing. On success it stages the build and requests a drained restart, and an agent running it ends its turn instead of waiting. If the new build fails to start three times, Clawstrum goes back to the previous one and `clawstrum doctor` reports it. `clawstrum rollback` does the same by hand, or drops a staged build that isn't live yet. `--no-test` skips the tests. Keep local changes on a branch and merge or rebase when you pull.
 
@@ -64,7 +65,7 @@ In the sandbox, only `/tmp`, the worker directory and `writable` can be written.
 
 Read, Edit, Write, Grep and Glob run outside the sandbox and refuse the hidden paths, including a Grep or Glob over a folder that holds one, such as `H` or `$HOME`.
 
-Codex subagents use Codex's `workspace-write` sandbox instead. They can write only to the worker directory, `/tmp` and `writable`, network follows `offlineRoles`, and escalation is declined. They can still read Clawstrum's key files, history and dotfiles. The sandbox doesn't cover the lead or MCP tools.
+Codex subagents use Codex's `workspace-write` sandbox instead. They can write only to the worker directory, `/tmp` and `writable`, network follows `offlineRoles`, and escalation is declined. They can still read Clawstrum's key files, history and dotfiles. The sandbox doesn't cover the lead or MCP tools. Gemini subagents run without a sandbox.
 
 ## Voice notes
 

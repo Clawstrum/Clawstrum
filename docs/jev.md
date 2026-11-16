@@ -85,4 +85,4 @@ clawstrum jev profile SESSION --offset 100
 
 These show per-call latency, tokens, cache hits and estimated cost, and need no key. Totals cover the returned page only, so follow `nextOffset`. In a channel, `research_status collection=decisions` shows the same for that channel.
 
-A source checkout can replay recorded test cases with `node scripts/eval-jev.mjs`, or call the live service with `--live --out NEW_DIR` (add `--provider openrouter` for OpenRouter).
+A source checkout can replay recorded test cases with `node scripts/eval-jev.mjs`, or call the live service with `--live --out NEW_DIR` (add `--provider openrouter` for OpenRouter). `--fixture FILE` uses your own cases instead, and `--threshold` (0 to 1) sets the pass mark.

@@ -57,20 +57,20 @@ An ID is 5 to 25 digits.
 
 ## Accounts
 
-| Field                     | Default          | Meaning                                                                                                 |
-| ------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------- |
-| `id`                      | required         | Up to 80 characters from `A-Z a-z 0-9 _ -`                                                              |
-| `provider`                | required         | `claude`, `codex` or `gemini`                                                                           |
-| `home`                    | required         | Where the provider keeps login, settings and sessions. Separate from your usual CLI login               |
-| `priority`                | `0`              | −1000 to 1000. Automatic routing tries higher first                                                     |
-| `model`                   | provider default | Passed to the SDK unchecked                                                                             |
-| `effort`                  | provider default | `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Claude rejects `ultra`                              |
-| `quotaBuckets`            | `[]`             | Quota limits that apply only to the primary `model`                                                     |
-| `modelFallbacks`          | `[]`             | Ordered `{model, quotaBuckets=[]}` on the same login and concurrency cap. Needs `model`. No model twice |
-| `tokenEnv`                | unset            | Claude only: variable holding an OAuth token for this account                                           |
-| `executable`              | bundled          | Provider executable to use. Must support `--version`                                                    |
-| `maxConcurrent`           | `4`              | Concurrent runs, 1 to 64                                                                                |
-| `owner`, `label`, `notes` | unset            | Description for people. Never a secret                                                                  |
+| Field                     | Default          | Meaning                                                                                                              |
+| ------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | required         | Up to 80 characters from `A-Z a-z 0-9 _ -`                                                                           |
+| `provider`                | required         | `claude`, `codex` or `gemini`                                                                                        |
+| `home`                    | required         | Where the provider keeps login, settings and sessions. Separate from your usual CLI login                            |
+| `priority`                | `0`              | -1000 to 1000. Automatic routing tries higher first                                                                  |
+| `model`                   | provider default | Passed to the SDK unchecked                                                                                          |
+| `effort`                  | provider default | `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Claude rejects `ultra`                                           |
+| `quotaBuckets`            | `[]`             | Quota limits that apply only to the primary `model`                                                                  |
+| `modelFallbacks`          | `[]`             | Ordered `{model, quotaBuckets=[]}` on the same login and concurrency cap. Needs `model`. No model twice              |
+| `tokenEnv`                | unset            | Claude only: variable holding an OAuth token for this account                                                        |
+| `executable`              | bundled          | Provider executable to use. Must support `--version`. Gemini has none bundled, see [Gemini](subscriptions.md#gemini) |
+| `maxConcurrent`           | `4`              | Concurrent runs, 1 to 64                                                                                             |
+| `owner`, `label`, `notes` | unset            | Description for people. Never a secret                                                                               |
 
 The buckets `five_hour`, `seven_day`, `5h`, `7d` and `unknown` can't be scoped to a model. See [subscriptions](subscriptions.md) for routing, fallback and quota warnings.
 
@@ -111,7 +111,7 @@ See [memory](memory-lifecycle.md) for what these do. Models are per provider (`c
 
 | Field                                | Default              | Meaning                                                                          |
 | ------------------------------------ | -------------------- | -------------------------------------------------------------------------------- |
-| `maintenance.maxCallsPerDay`         | `24`                 | Calls per rolling 24 hours, 0 to 10000. 0 pauses them                            |
+| `maintenance.maxCallsPerDay`         | `24`                 | Calls per rolling 24 hours, 0 to 10000. 0 pauses all but the daily pass          |
 | `maintenance.minIntervalMs`          | `1800000`            | Time between call starts, 0 to 86400000                                          |
 | `maintenance.maxConcurrent`          | `1`                  | Calls at once, 1 to 16                                                           |
 | `maintenance.requestedReserve`       | `6`                  | Calls kept for passes after a compaction, at most a quarter of the total         |

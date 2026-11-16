@@ -4,7 +4,7 @@
 
 ## Base prompt
 
-Lead runs start with Clawstrum's base prompt, [templates/base-prompt.md](../templates/base-prompt.md), in place of the provider's built-in prompt, followed by your `AGENTS.md` instructions. It changes only with a Clawstrum release. Subagents and background passes keep the provider's default. Gemini's prompt can't be replaced, so there the base prompt opens each new session.
+Lead runs start with Clawstrum's base prompt, [templates/base-prompt.md](../templates/base-prompt.md), in place of the provider's built-in prompt, followed by your `AGENTS.md` instructions. Outside the main channel it changes only with a Clawstrum release. The main channel's version also includes your customize skill, read on every run (see [system prompt](system-prompt.md#base-prompt)). Subagents and background passes keep the provider's default. Gemini's prompt can't be replaced, so there the base prompt opens each new session.
 
 ## Editing
 

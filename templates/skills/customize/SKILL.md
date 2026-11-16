@@ -14,10 +14,10 @@ Use when the user wants Clawstrum to behave differently from now on. The full ma
    - The user's own tools: an entry under `mcpServers` in `$CLAWSTRUM_HOME/config.json` (`command`, `args`, `env`), then a restart. Their limits belong in the tool server, not in instructions.
    - Voice notes to text: run `scripts/install-voice.sh` from the Clawstrum package, set `voice.enabled` in `config.json`, then a restart (`docs/customize.md`, Voice notes). Names go in `voice-words.txt` in `$CLAWSTRUM_HOME` or the workspace, live.
    - Hooks: Claude's own settings format in the workspace `.claude/settings.json`. Claude turns only.
-   - Accounts, channels, limits: `config.json`, then a restart.
+   - Accounts and the channel list (`accounts`, `discord.channelIds` in `config.json`): live within a few seconds. Other limits and routing: `config.json`, then a restart.
    - Code: only in a source checkout (`src/` next to `dist/`). Never edit `dist/`.
 2. Read the file before changing it and keep the user's existing rules. Make the change.
-3. Configuration changes need a restart: run `clawstrum restart request` without `--wait` and finish the turn.
+3. Other configuration changes need a restart: run `clawstrum restart request` without `--wait` and finish the turn.
 4. Code changes: edit `src/`, add or adjust a test, run `clawstrum apply` with a long command timeout (it runs the whole test suite), which tests the change in a separate copy and requests the restart itself, and finish the turn. If a step fails, the running build is unchanged: read its output, fix and run it again, or stop and report. After the restart, check that the change works. `clawstrum rollback` returns to the previous build.
 5. Tell the user in two or three lines what changed, in which file, and when it takes effect. Do not push or open a pull request unless asked.
 

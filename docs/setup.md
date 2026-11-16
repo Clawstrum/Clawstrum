@@ -67,7 +67,7 @@ clawstrum start
 
 At its first start the agent writes first in the main channel. It does this once, and not if the channel already has a conversation.
 
-Account changes apply to the running daemon within seconds. Other `config.json` changes need a restart. See the [configuration reference](configuration.md) and the example [templates/config.example.json](../templates/config.example.json).
+Changes to `accounts` and `discord.channelIds` apply to the running daemon within seconds. Other `config.json` changes need a restart. See the [configuration reference](configuration.md) and the example [templates/config.example.json](../templates/config.example.json).
 
 ### Running as a service
 

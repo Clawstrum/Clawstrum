@@ -99,7 +99,7 @@ See [self-review](customize.md#self-review).
 | `clawstrum backup verify SNAPSHOT_DIRECTORY`                                                                                                                 | Check a snapshot's manifest, checksum and integrity                         |
 | `clawstrum service backup --directory DIRECTORY [--output UNIT_DIRECTORY]`                                                                                   | systemd timer for live snapshots (default every 300 s, keep 12 and 7 days)  |
 | `clawstrum service health [--interval-seconds N] [--output UNIT_DIRECTORY]`                                                                                  | systemd timer for `doctor --notify` (default every 300 s)                   |
-| `clawstrum restart request [--timeout-ms N] [--drain-ms N] [--wait]`                                                                                         | Finish current work, then restart under the supervisor                      |
+| `clawstrum restart request [--timeout-ms N] [--drain-ms N] [--wait]`                                                                                         | Restart under the supervisor, giving running work 30 s by default           |
 | `clawstrum restart status` / `restart cancel`                                                                                                                | Show or cancel a pending restart                                            |
 | `clawstrum apply [--no-test]`                                                                                                                                | Type-check, build and test this checkout, then restart on it                |
 | `clawstrum rollback`                                                                                                                                         | Restore the build from before the last `apply` and restart                  |
@@ -113,7 +113,7 @@ See [operations](operations.md#backup) for backup, restore and upgrade steps. Cl
 
 `clawstrum start` takes the daemon lock, connects to Discord with the token from `discord.tokenEnv`, registers `/clawstrum`, reads missed messages and recovers interrupted work. Then it logs `ready` with name, version and process ID. One daemon runs per state directory. The lock lives in `daemon-lock.db` and is released when the process dies. `daemon.lock` records process ID, host and start time. Several hosts can't share one state directory.
 
-On SIGINT or SIGTERM it waits for active work, then disconnects and exits. The unit from `clawstrum service` sets `Restart=on-failure`, `RestartSec=5`, `StartLimitIntervalSec=0`, `KillMode=control-group` and `TimeoutStopSec=30`. On macOS, use your own service manager or keep `clawstrum start` running in a terminal.
+On SIGINT or SIGTERM it cancels running turns, puts their input back in the queue, then disconnects and exits. To give running work time to finish first, use `clawstrum restart request`. The unit from `clawstrum service` sets `Restart=on-failure`, `RestartSec=5`, `StartLimitIntervalSec=0`, `KillMode=control-group` and `TimeoutStopSec=30`. On macOS, use your own service manager or keep `clawstrum start` running in a terminal.
 
 ## Diagnostics
 

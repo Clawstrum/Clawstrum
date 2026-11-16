@@ -47,7 +47,7 @@ On a fatal error the daemon requeues work and exits non-zero within 25 seconds (
 
 systemd can call an unhealthy daemon `active`. `clawstrum doctor` checks the heartbeat, queues, schedules, failed deliveries, permissions and sign-ins.
 
-`clawstrum service health --output ~/.config/systemd/user` writes a timer that runs `clawstrum doctor --notify` every five minutes (`--interval-seconds` to change). It runs the database checks and checks free space where the state and database live, failing below 1 GiB or 2 %. It posts to `discord.noticeChannelId` through Discord's HTTP API, so it works while the daemon is down, when the set of failures changes and once when all pass again.
+`clawstrum service health --output ~/.config/systemd/user` writes a timer that runs `clawstrum doctor --notify` every five minutes (`--interval-seconds` to change). It runs the database checks and checks free space where the state and database live, failing below 1 GiB or 2 %. It skips the integrity scan and sign-in checks, so run plain `clawstrum doctor` now and then. It posts to `discord.noticeChannelId` through Discord's HTTP API, so it works while the daemon is down, when the set of failures changes and once when all pass again.
 
 `clawstrum performance [SESSION] --limit 20` shows recent timings and the queue without a model call. See [performance](performance.md). Memory reviews log `memory_review_completed` or `memory_review_deferred`. Their limits are in [memory](memory-lifecycle.md#background-passes) and their settings under `runtime.memoryReview` in [configuration](configuration.md).
 
@@ -77,7 +77,7 @@ clawstrum export SESSION conversation.json
 | Continue on another account       | `/clawstrum action:switch account:ID [model:M]` or `clawstrum switch SESSION ID [--model M]`                                                                                                                |
 | Another host holds the lock       | Check that host. Never delete `daemon-lock.db`                                                                                                                                                              |
 
-`stop` doesn't cancel background commands, Slurm jobs or watches. See [research tools](research.md). A reply that is only `CLAWSTRUM_QUIET` is never delivered.
+`stop` doesn't cancel background commands, Slurm jobs or watches. See [research tools](research.md). A reply that is only `CLAWSTRUM_QUIET` is never delivered. `<internal>` tags don't hide text: it is sent like the rest.
 
 Lead turns have no tool-turn cap by default (`runtime.scheduledMaxTurns: 0`). A positive value applies to every task-only lead turn, and hitting it saves a resumable failure. Change the value, restart, then `resume`.
 
