@@ -11,6 +11,7 @@ import {
   claudeHookInputs,
   geminiToolCall,
   runHooks,
+  shellReadFiles,
   startHookRelay,
 } from '../src/hook-relay.js';
 
@@ -271,7 +272,7 @@ test('client without a relay allows; with a missing socket it denies PreToolUse 
   assert.equal(codexPost.stdout, '');
 });
 
-test('codex relay: only a deny is printed, with a reason even when the hook gave none', async (t) => {
+test('codex relay: a deny is printed with a reason even when the hook gave none, an advisory only as additionalContext', async (t) => {
   let answer: any = {};
   const hooks: Options['hooks'] = { PreToolUse: [{ hooks: [async () => answer] }] };
   const relay = await startHookRelay({ hooks, format: 'codex', dir: tempDir(t) });
@@ -291,9 +292,14 @@ test('codex relay: only a deny is printed, with a reason even when the hook gave
       additionalContext: 'note',
     },
   };
-  const allowed = await runClient('codex', payload, relay.env);
-  assert.equal(allowed.code, 0);
-  assert.equal(allowed.stdout, '');
+  // No decision, no rewrite (Codex rejects both): only the advice.
+  const advised = await runClient('codex', payload, relay.env);
+  assert.equal(advised.code, 0);
+  assert.deepEqual(JSON.parse(advised.stdout), {
+    hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: 'note' },
+  });
+  answer = { systemMessage: 'ignored', hookSpecificOutput: { hookEventName: 'PreToolUse' } };
+  assert.equal((await runClient('codex', payload, relay.env)).stdout, '');
   answer = deny('');
   const denied = await runClient('codex', payload, relay.env);
   assert.deepEqual(JSON.parse(denied.stdout), deny('Refused by a Clawstrum check.'));
@@ -454,4 +460,247 @@ test('codex relay: an apply_patch is refused when any one of its files is refuse
   const allowed = await runClient('codex', patch('/w/a.txt', '/w/c.txt'), relay.env);
   assert.equal(allowed.stdout, '');
   assert.deepEqual(seen, ['Write:/w/a.txt', 'Write:/w/c.txt']);
+});
+
+const REL = '/w';
+
+test('shellReadFiles finds the files cat, head, tail, less, sed and grep read, and nothing it is unsure of', () => {
+  const read = (command: string) => shellReadFiles(command, REL);
+  assert.deepEqual(read('cat WRITING.md'), ['/w/WRITING.md']);
+  assert.deepEqual(read('cat /a/b.md c.md'), ['/a/b.md', '/w/c.md']);
+  assert.deepEqual(read('head -n 20 notes.txt'), ['/w/notes.txt']);
+  assert.deepEqual(read('head -20 notes.txt'), ['/w/notes.txt']);
+  assert.deepEqual(read('tail -n +5 -- notes.txt'), ['/w/notes.txt']);
+  assert.deepEqual(read('less notes.txt'), ['/w/notes.txt']);
+  assert.deepEqual(read("sed -n '1,20p' notes.txt"), ['/w/notes.txt']);
+  assert.deepEqual(read("sed -e 's/a/b/' -n notes.txt"), ['/w/notes.txt']);
+  assert.deepEqual(read('grep -n foo notes.txt other.txt'), ['/w/notes.txt', '/w/other.txt']);
+  assert.deepEqual(read('grep -e foo -e bar notes.txt'), ['/w/notes.txt']);
+  assert.deepEqual(read("grep -m 3 'two words' notes.txt"), ['/w/notes.txt']);
+  assert.deepEqual(read('cat "my notes.txt"'), ['/w/my notes.txt']);
+  // A pipeline, a sequence, a leading cd and a shell wrapper are followed.
+  assert.deepEqual(read('cat a.md | head -3'), ['/w/a.md']);
+  assert.deepEqual(read('cd sub && cat a.md; cat /x/y.md'), ['/w/sub/a.md', '/x/y.md']);
+  assert.deepEqual(read("bash -lc 'cat a.md'"), ['/w/a.md']);
+  assert.deepEqual(read('FOO=1 cat a.md'), ['/w/a.md']);
+  assert.deepEqual(read('cat a.md a.md'), ['/w/a.md']);
+  // Not reads, or not certain.
+  assert.deepEqual(read("sed -i 's/a/b/' notes.txt"), []);
+  assert.deepEqual(read('echo cat notes.txt'), []);
+  assert.deepEqual(read('ls notes.txt'), []);
+  assert.deepEqual(read('cat $HOME/x.md'), []);
+  assert.deepEqual(read('cat "$(pwd)/x.md"'), []);
+  assert.deepEqual(read('cat *.md'), []);
+  assert.deepEqual(read('cat -'), []);
+  assert.deepEqual(read('grep foo'), []);
+  assert.deepEqual(read('cat > out.md <<EOF\ncat inside.md\nEOF'), []);
+  assert.deepEqual(read(''), []);
+  assert.deepEqual(shellReadFiles(undefined, REL), []);
+  assert.deepEqual(shellReadFiles('cat ~/x.md', REL), [path.join(os.homedir(), 'x.md')]);
+});
+
+test('claudeHookInputs: a finished Codex shell read also stands for a Read PostToolUse, and nothing else does', (t) => {
+  const dir = tempDir(t);
+  fs.writeFileSync(path.join(dir, 'rules.md'), 'x');
+  const post = (tool_name: string, tool_input: unknown, tool_response: unknown = 'out') => ({
+    hook_event_name: 'PostToolUse',
+    session_id: 's',
+    cwd: dir,
+    tool_name,
+    tool_input,
+    tool_response,
+    tool_use_id: 'exec-1',
+  });
+  const names = (payload: unknown) =>
+    (claudeHookInputs('codex', payload) as any[]).map((i) => [
+      i.hook_event_name,
+      i.tool_name,
+      i.tool_input.file_path ?? i.tool_input.command,
+    ]);
+  assert.deepEqual(names(post('Bash', { command: 'cat rules.md' })), [
+    ['PostToolUse', 'Bash', 'cat rules.md'],
+    ['PostToolUse', 'Read', path.join(dir, 'rules.md')],
+  ]);
+  const read = (claudeHookInputs('codex', post('Bash', { command: 'cat rules.md' })) as any[])[1];
+  assert.equal(read.tool_use_id, 'exec-1');
+  assert.equal(read.session_id, 's');
+  // A file that is not there (a read that failed), a command that reads nothing, and the PreToolUse of a read.
+  assert.deepEqual(names(post('Bash', { command: 'cat gone.md' })), [
+    ['PostToolUse', 'Bash', 'cat gone.md'],
+  ]);
+  assert.deepEqual(names(post('Bash', { command: 'ls' })), [['PostToolUse', 'Bash', 'ls']]);
+  assert.deepEqual(
+    names({ ...post('Bash', { command: 'cat rules.md' }), hook_event_name: 'PreToolUse' }),
+    [['PreToolUse', 'Bash', 'cat rules.md']],
+  );
+  // A directory is not a file read.
+  assert.deepEqual(names(post('Bash', { command: 'cat .' })), [['PostToolUse', 'Bash', 'cat .']]);
+  // Gemini payloads do not get the mapping.
+  assert.equal(
+    claudeHookInputs('gemini', { ...geminiPre('run_command', {}), hookEventName: 'PostToolUse' })
+      .length,
+    1,
+  );
+  // apply_patch after the call: one Write or Edit per file, unless the patch failed.
+  const patch = post(
+    'apply_patch',
+    { command: PATCH },
+    'Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess.\n',
+  );
+  assert.deepEqual(
+    (claudeHookInputs('codex', patch) as any[]).map((i) => [
+      i.hook_event_name,
+      i.tool_name,
+      i.tool_input.file_path,
+    ]),
+    [
+      ['PostToolUse', 'Write', '/w/new.txt'],
+      ['PostToolUse', 'Edit', '/w/old.txt'],
+      ['PostToolUse', 'Write', '/w/renamed.txt'],
+      ['PostToolUse', 'Write', '/w/dead.txt'],
+    ],
+  );
+  const failed = claudeHookInputs('codex', {
+    ...patch,
+    tool_response: 'Exit code: 1\nOutput:\nerror',
+  }) as any[];
+  assert.deepEqual(
+    failed.map((i) => i.tool_name),
+    ['apply_patch'],
+  );
+});
+
+test('codex relay: a PostToolUse reaches the PostToolUse hooks as a Bash call and a Read call, and prints nothing', async (t) => {
+  const dir = tempDir(t);
+  fs.writeFileSync(path.join(dir, 'rules.md'), 'x');
+  const seen: string[] = [];
+  const hooks: Options['hooks'] = {
+    PostToolUse: [
+      {
+        hooks: [
+          async (input) => {
+            const i = input as any;
+            seen.push(
+              `${i.hook_event_name}:${i.tool_name}:${i.tool_input.file_path ?? i.tool_input.command}`,
+            );
+            return {};
+          },
+        ],
+      },
+    ],
+  };
+  const relay = await startHookRelay({ hooks, format: 'codex', dir: tempDir(t) });
+  t.after(() => relay.close());
+  const result = await runClient(
+    'codex',
+    {
+      hook_event_name: 'PostToolUse',
+      session_id: 's',
+      cwd: dir,
+      tool_name: 'Bash',
+      tool_input: { command: 'cat rules.md' },
+      tool_response: 'x',
+    },
+    relay.env,
+  );
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, '');
+  assert.deepEqual(seen, [
+    'PostToolUse:Bash:cat rules.md',
+    `PostToolUse:Read:${path.join(dir, 'rules.md')}`,
+  ]);
+});
+
+test('codex relay: advice from a PostToolUse is printed as PostToolUse additionalContext; advice from several files of one patch is joined once', async (t) => {
+  const hooks: Options['hooks'] = {
+    PostToolUse: [
+      {
+        hooks: [
+          async () => ({
+            hookSpecificOutput: {
+              hookEventName: 'PostToolUse' as const,
+              additionalContext: 'check the paper',
+            },
+          }),
+        ],
+      },
+    ],
+    PreToolUse: [
+      {
+        hooks: [
+          async (input) => ({
+            systemMessage: 'x',
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse' as const,
+              additionalContext: `note for ${(input as any).tool_input.file_path}`,
+            },
+          }),
+        ],
+      },
+    ],
+  };
+  const relay = await startHookRelay({ hooks, format: 'codex', dir: tempDir(t) });
+  t.after(() => relay.close());
+  const base = { session_id: 's', cwd: '/w', tool_name: 'Bash', tool_input: { command: 'ls' } };
+  const post = await runClient(
+    'codex',
+    { ...base, hook_event_name: 'PostToolUse', tool_response: '' },
+    relay.env,
+  );
+  assert.deepEqual(JSON.parse(post.stdout), {
+    hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'check the paper' },
+  });
+  const patch = {
+    ...base,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'apply_patch',
+    tool_input: {
+      command:
+        '*** Begin Patch\n*** Add File: /w/a.txt\n+x\n*** Add File: /w/b.txt\n+y\n*** End Patch',
+    },
+  };
+  const pre = await runClient('codex', patch, relay.env);
+  assert.deepEqual(JSON.parse(pre.stdout), {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      additionalContext: 'note for /w/a.txt\n\nnote for /w/b.txt',
+    },
+  });
+});
+
+test('codex relay: a refusal on one file of a patch wins over advice from an earlier file', async (t) => {
+  const hooks: Options['hooks'] = {
+    PreToolUse: [
+      {
+        hooks: [
+          async (input) =>
+            (input as any).tool_input.file_path === '/w/b.txt'
+              ? deny('no b')
+              : {
+                  hookSpecificOutput: {
+                    hookEventName: 'PreToolUse' as const,
+                    additionalContext: 'advice a',
+                  },
+                },
+        ],
+      },
+    ],
+  };
+  const relay = await startHookRelay({ hooks, format: 'codex', dir: tempDir(t) });
+  t.after(() => relay.close());
+  const out = await runClient(
+    'codex',
+    {
+      hook_event_name: 'PreToolUse',
+      session_id: 's',
+      cwd: '/w',
+      tool_name: 'apply_patch',
+      tool_input: {
+        command:
+          '*** Begin Patch\n*** Add File: /w/a.txt\n+x\n*** Add File: /w/b.txt\n+y\n*** End Patch',
+      },
+    },
+    relay.env,
+  );
+  assert.deepEqual(JSON.parse(out.stdout), deny('no b'));
 });

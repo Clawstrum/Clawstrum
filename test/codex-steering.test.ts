@@ -52,7 +52,7 @@ for await(const line of createInterface({input:process.stdin})) {
  else if(m.method==='hooks/list') {
   const flag=process.argv.find(a=>a.startsWith('hooks.PreToolUse='));
   const command=flag?JSON.parse(/command=("(?:[^"\\\\]|\\\\.)*")/.exec(flag)[1]):null;
-  send({id:m.id,result:{data:[{cwd:m.params.cwds[0],warnings:[],errors:[],hooks:command?[{key:'k',eventName:'preToolUse',handlerType:'command',command,currentHash:'sha256:h',trustStatus:'trusted'}]:[]}]}});
+  send({id:m.id,result:{data:[{cwd:m.params.cwds[0],warnings:[],errors:[],hooks:command?[{key:'k',eventName:'preToolUse',handlerType:'command',command,currentHash:'sha256:h',trustStatus:'trusted'},{key:'k2',eventName:'postToolUse',handlerType:'command',command,currentHash:'sha256:h',trustStatus:'trusted'}]:[]}]}});
  }
  else if(m.method==='thread/inject_items')send({id:m.id,result:{}});
  else if(m.method==='turn/start') {

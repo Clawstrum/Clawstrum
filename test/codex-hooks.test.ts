@@ -9,13 +9,16 @@ import type { ProviderEvent, ProviderRequest } from '../src/types.js';
 import { fixture } from './helpers.js';
 
 const KEY = '/<session-flags>/config.toml:pre_tool_use:0:0';
+const POST_KEY = '/<session-flags>/config.toml:post_tool_use:0:0';
 
 /**
  * A fake `codex app-server`. It lists the hook passed with -c, reports it untrusted until trust is
  * written (config/batchWrite, or a [hooks.state] table in $CODEX_HOME/config.toml), and records
  * every request. Modes: `batch-fails` (config/batchWrite errors), `never-trusted` (trust has no
  * effect), `run-hook` (the turn runs the hook command on a `cat .env` call and answers with what it
- * printed), `thread-fails` (thread/start errors).
+ * printed), `run-calls` (the turn runs the hook command once per call listed in calls.json, as
+ * Codex would before and after each tool, and answers with the list of printed outputs),
+ * `no-post` (the PostToolUse flag is ignored), `thread-fails` (thread/start errors).
  */
 function setup(t: test.TestContext, mode = 'plain') {
   const f = fixture(t);
@@ -32,7 +35,7 @@ import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 if(process.argv.includes('--version')) {console.log('codex-cli 0.154.0');process.exit(0);}
 const mode=${JSON.stringify(mode)};
-const key=${JSON.stringify(KEY)};
+const keys={preToolUse:${JSON.stringify(KEY)},postToolUse:${JSON.stringify(POST_KEY)}};
 const log=x=>fs.appendFileSync(${JSON.stringify(record)},JSON.stringify(x)+'\\n');
 const socket=process.env.CLAWSTRUM_HOOK_SOCKET??null;
 log({args:process.argv.slice(2),home:process.env.CODEX_HOME,socket,socketExists:socket?fs.existsSync(socket):null});
@@ -41,25 +44,28 @@ const notify=(method,params)=>send({method,params:{threadId:'thread-live',turnId
 const args=process.argv;
 const flag=args.find(a=>a.startsWith('hooks.PreToolUse='));
 const command=flag?JSON.parse(/command=("(?:[^"\\\\]|\\\\.)*")/.exec(flag)[1]):null;
+const postFlag=args.find(a=>a.startsWith('hooks.PostToolUse='));
+const postCommand=postFlag&&mode!=='no-post'?JSON.parse(/command=("(?:[^"\\\\]|\\\\.)*")/.exec(postFlag)[1]):null;
 const hash='sha256:'+crypto.createHash('sha256').update(command??'').digest('hex');
-let trusted=false;
+const trusted=new Set();
 const config=()=>{try{return fs.readFileSync(process.env.CODEX_HOME+'/config.toml','utf8');}catch{return '';}};
-const status=()=>{
+const status=key=>{
   if(mode==='never-trusted')return 'untrusted';
-  if(trusted||config().includes('[hooks.state.'+JSON.stringify(key)+']\\ntrusted_hash = '+JSON.stringify(hash)))return 'trusted';
+  if(trusted.has(key)||config().includes('[hooks.state.'+JSON.stringify(key)+']\\ntrusted_hash = '+JSON.stringify(hash)))return 'trusted';
   return 'untrusted';
 };
+const listed=(eventName,key,command)=>({key,eventName,handlerType:'command',command,currentHash:hash,trustStatus:status(key),matcher:null,timeoutSec:60,enabled:true,isManaged:false,source:'sessionFlags',sourcePath:'/<session-flags>/config.toml',displayOrder:0,async:false,statusMessage:null,additionalContextLimit:null,pluginId:null});
 let runHookOutput='';
 for await(const line of createInterface({input:process.stdin})) {
  const m=JSON.parse(line);log(m);
  if(m.method==='initialize')send({id:m.id,result:{userAgent:'test'}});
  else if(m.method==='config/read')send({id:m.id,result:{config:{}}});
  else if(m.method==='hooks/list') {
-  send({id:m.id,result:{data:[{cwd:m.params.cwds[0],warnings:[],errors:[],hooks:command?[{key,eventName:'preToolUse',handlerType:'command',command,currentHash:hash,trustStatus:status(),matcher:null,timeoutSec:60,enabled:true,isManaged:false,source:'sessionFlags',sourcePath:'/<session-flags>/config.toml',displayOrder:0,async:false,statusMessage:null,additionalContextLimit:null,pluginId:null}]:[]}]}});
+  send({id:m.id,result:{data:[{cwd:m.params.cwds[0],warnings:[],errors:[],hooks:[...(command?[listed('preToolUse',keys.preToolUse,command)]:[]),...(postCommand?[listed('postToolUse',keys.postToolUse,postCommand)]:[])]}]}});
  }
  else if(m.method==='config/batchWrite') {
   if(mode==='batch-fails')send({id:m.id,error:{code:-32603,message:'config write failed'}});
-  else {trusted=true;send({id:m.id,result:{status:'ok',version:'v',filePath:process.env.CODEX_HOME+'/config.toml'}});}
+  else {for(const e of m.params.edits)trusted.add(JSON.parse(e.keyPath.slice('hooks.state.'.length)));send({id:m.id,result:{status:'ok',version:'v',filePath:process.env.CODEX_HOME+'/config.toml'}});}
  }
  else if(m.method==='thread/start') {
   if(mode==='thread-fails')send({id:m.id,error:{code:-32603,message:'thread failed'}});
@@ -78,6 +84,20 @@ for await(const line of createInterface({input:process.stdin})) {
    child.on('close',()=>finish(out));
    const call=mode==='run-hook-patch'?{tool_name:'apply_patch',tool_input:{command:'*** Begin Patch\\n*** Add File: /var/lib/clawstrum-test-outside/x.txt\\n+x\\n*** End Patch'}}:{tool_name:'Bash',tool_input:{command:'cat .env'}};
    child.stdin.end(JSON.stringify({hook_event_name:'PreToolUse',...call,tool_use_id:'call-1',session_id:'thread-live',cwd:process.cwd()}));
+  } else if(mode==='run-calls'&&command) {
+   const calls=JSON.parse(fs.readFileSync(${JSON.stringify(path.join(f.home, 'calls.json'))},'utf8'));
+   const outputs=[];
+   for(const call of calls) {
+    const {event,...rest}=call;
+    const printed=await new Promise(resolve=>{
+     const child=spawn('sh',['-c',command],{stdio:['pipe','pipe','inherit']});
+     let out='';child.stdout.on('data',d=>out+=d);
+     child.on('close',()=>resolve(out));
+     child.stdin.end(JSON.stringify({hook_event_name:event,...rest,tool_use_id:'call-x',session_id:'thread-live',cwd:process.cwd()}));
+    });
+    outputs.push(printed===''?null:JSON.parse(printed));
+   }
+   finish(JSON.stringify(outputs));
   } else finish('DONE');
  }
 }
@@ -149,9 +169,11 @@ test('a run with research hooks passes the hook flags and the relay socket, and 
   const args: string[] = messages[0].args;
   assert.ok(args.includes('hooks'));
   assert.equal(args[args.indexOf('hooks') - 1], '--enable');
-  const flag = args.find((a) => a.startsWith('hooks.PreToolUse='))!;
-  assert.ok(flag.includes(codexHookCommand()));
-  assert.equal(args[args.indexOf(flag) - 1], '-c');
+  for (const event of ['PreToolUse', 'PostToolUse']) {
+    const flag = args.find((a) => a.startsWith(`hooks.${event}=`))!;
+    assert.ok(flag.includes(codexHookCommand()));
+    assert.equal(args[args.indexOf(flag) - 1], '-c');
+  }
   // The relay socket sits in a private temp folder and is open while Codex runs.
   assert.match(messages[0].socket, /clawstrum-codex-[^/]+\/hook\.sock$/);
   assert.equal(messages[0].socketExists, true);
@@ -162,10 +184,15 @@ test('a run with research hooks passes the hook flags and the relay socket, and 
   const list = messages.find((m) => m.method === 'hooks/list');
   assert.deepEqual(list.params, { cwds: [s.session.workspace] });
   const write = messages.find((m) => m.method === 'config/batchWrite');
-  assert.equal(write.params.edits.length, 1);
-  assert.equal(write.params.edits[0].keyPath, `hooks.state.${JSON.stringify(KEY)}`);
-  assert.match(write.params.edits[0].value.trusted_hash, /^sha256:[0-9a-f]{64}$/);
-  assert.equal(write.params.edits[0].mergeStrategy, 'upsert');
+  // One trust entry per hook event, each from the listed key.
+  assert.deepEqual(
+    write.params.edits.map((e: any) => e.keyPath),
+    [KEY, POST_KEY].map((key) => `hooks.state.${JSON.stringify(key)}`),
+  );
+  for (const edit of write.params.edits) {
+    assert.match(edit.value.trusted_hash, /^sha256:[0-9a-f]{64}$/);
+    assert.equal(edit.mergeStrategy, 'upsert');
+  }
   // The relay closed with the run: no socket file, no private folder.
   assert.ok(!fs.existsSync(messages[0].socket));
   assert.ok(!fs.existsSync(path.dirname(messages[0].socket)));
@@ -183,7 +210,7 @@ test('an already trusted hook is not written again', async (t) => {
     .digest('hex');
   fs.writeFileSync(
     path.join(s.account.home, 'config.toml'),
-    withHookTrust('', KEY, `sha256:${hash}`),
+    withHookTrust(withHookTrust('', KEY, `sha256:${hash}`), POST_KEY, `sha256:${hash}`),
   );
   fs.rmSync(path.join(s.home, 'protocol.jsonl'));
   await codexAppServerProvider.run(s.request());
@@ -202,7 +229,7 @@ test('when config/batchWrite fails the trust goes into config.toml and nothing e
   assert.ok(text.startsWith(own));
   assert.match(
     text,
-    /\n\[hooks\.state\."\/<session-flags>\/config\.toml:pre_tool_use:0:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"\n$/,
+    /\n\[hooks\.state\."\/<session-flags>\/config\.toml:pre_tool_use:0:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"\n\n\[hooks\.state\."\/<session-flags>\/config\.toml:post_tool_use:0:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"\n$/,
   );
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   assert.ok(
@@ -261,6 +288,14 @@ test('Codex running the hook command reaches the research checks, which refuse c
   assert.ok(out.hookSpecificOutput.permissionDecisionReason.length > 0);
 });
 
+test('a Codex that does not list the PostToolUse hook fails the run before the thread starts', async (t) => {
+  const s = setup(t, 'no-post');
+  await assert.rejects(codexAppServerProvider.run(s.request()), /did not list .*postToolUse/);
+  const messages = s.protocol();
+  assert.ok(!methods(messages).includes('thread/start'));
+  assert.ok(!fs.existsSync(path.dirname(messages[0].socket)));
+});
+
 test('Codex running the hook command on an apply_patch outside the permitted roots is refused in strict mode', async (t) => {
   const s = setup(t, 'run-hook-patch');
   const final = await codexAppServerProvider.run(
@@ -274,7 +309,106 @@ test('Codex running the hook command on an apply_patch outside the permitted roo
   );
 });
 
-test('the same apply_patch is allowed (no output) when validation is advisory', async (t) => {
+test('the same apply_patch goes ahead when validation is advisory, and the warning reaches Codex as additionalContext only', async (t) => {
   const s = setup(t, 'run-hook-patch');
-  assert.equal(await codexAppServerProvider.run(s.request()), '');
+  const out = JSON.parse(await codexAppServerProvider.run(s.request()));
+  assert.deepEqual(Object.keys(out), ['hookSpecificOutput']);
+  assert.deepEqual(Object.keys(out.hookSpecificOutput).sort(), [
+    'additionalContext',
+    'hookEventName',
+  ]);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.match(
+    out.hookSpecificOutput.additionalContext,
+    /clawstrum-test-outside\/x\.txt.*outside every permitted root/,
+  );
+});
+
+const LONG_PROSE = 'Neurons in cortex fire in sparse bursts. '.repeat(10);
+const texPatch = `*** Begin Patch\n*** Add File: paper.tex\n+\\section{Introduction}\n+${LONG_PROSE}\n*** End Patch`;
+const readRules = { tool_name: 'Bash', tool_input: { command: 'cat WRITING.md' } };
+
+/** Runs the hook command once per call, as Codex does before and after each tool, and returns what it printed. */
+async function runCalls(
+  t: test.TestContext,
+  calls: object[],
+  validation: 'strict' | 'advisory',
+): Promise<any[]> {
+  const s = setup(t, 'run-calls');
+  fs.writeFileSync(path.join(s.session.workspace, 'WRITING.md'), 'Use plain words.\n');
+  fs.writeFileSync(path.join(s.session.workspace, 'notes.txt'), 'a note\n');
+  fs.writeFileSync(path.join(s.home, 'calls.json'), JSON.stringify(calls));
+  const final = await codexAppServerProvider.run(
+    s.request({ research: researchSchema.parse({ enabled: true, validation }) }),
+  );
+  return JSON.parse(final);
+}
+const texWrite = { tool_name: 'apply_patch', tool_input: { command: texPatch } };
+
+test('strict: a .tex write is refused until a finished shell read of the rules file, then it is allowed', async (t) => {
+  const out = await runCalls(
+    t,
+    [
+      { event: 'PreToolUse', ...texWrite },
+      // A read that failed, and a read of some other file, do not count.
+      { event: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'cat nowhere.md' } },
+      {
+        event: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'cat nowhere.md' },
+        tool_response: 'cat: nowhere.md: No such file or directory\n',
+      },
+      {
+        event: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'cat notes.txt' },
+        tool_response: 'a note\n',
+      },
+      { event: 'PreToolUse', ...texWrite },
+      // A rules read that has only started (PreToolUse) does not count either.
+      { event: 'PreToolUse', ...readRules },
+      { event: 'PreToolUse', ...texWrite },
+      { event: 'PostToolUse', ...readRules, tool_response: 'Use plain words.\n' },
+      { event: 'PreToolUse', ...texWrite },
+      {
+        event: 'PostToolUse',
+        ...texWrite,
+        tool_response:
+          'Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nA paper.tex\n',
+      },
+    ],
+    'strict',
+  );
+  const refused = [0, 4, 6].map((i) => out[i].hookSpecificOutput);
+  for (const r of refused) {
+    assert.equal(r.hookEventName, 'PreToolUse');
+    assert.equal(r.permissionDecision, 'deny');
+    assert.match(r.permissionDecisionReason, /nothing has read them during this run/);
+  }
+  assert.deepEqual(
+    out.filter((_, i) => ![0, 4, 6].includes(i)),
+    [null, null, null, null, null, null, null],
+  );
+});
+
+test('advisory: the same .tex write goes ahead and the writing warning is delivered as additionalContext', async (t) => {
+  const out = await runCalls(
+    t,
+    [
+      { event: 'PreToolUse', ...texWrite },
+      { event: 'PostToolUse', ...readRules, tool_response: 'Use plain words.\n' },
+      { event: 'PreToolUse', ...texWrite },
+    ],
+    'advisory',
+  );
+  assert.deepEqual(Object.keys(out[0]), ['hookSpecificOutput']);
+  assert.equal(out[0].hookSpecificOutput.hookEventName, 'PreToolUse');
+  assert.equal(out[0].hookSpecificOutput.permissionDecision, undefined);
+  assert.match(
+    out[0].hookSpecificOutput.additionalContext,
+    /nothing has read them during this run/,
+  );
+  // Once the rules were read there is nothing to warn about.
+  assert.equal(out[1], null);
+  assert.equal(out[2], null);
 });

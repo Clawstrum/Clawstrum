@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import type {
   HookCallbackMatcher,
@@ -7,6 +8,7 @@ import type {
   Options,
   SyncHookJSONOutput,
 } from '@anthropic-ai/claude-agent-sdk';
+import { commandArgvs } from './research/shell.js';
 import type { ProviderEvent } from './types.js';
 
 /**
@@ -66,6 +68,118 @@ export function geminiToolCall(
       return { tool_name: 'Workflow', tool_input: { ...input, script: JSON.stringify(input) } };
     default:
       return { tool_name: name, tool_input: input };
+  }
+}
+
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+/** Commands that read the files named on their command line. `pattern` commands take a pattern or
+ * script as their first operand unless -e or -f gave one. `values` are the options that take a value. */
+const READERS: Record<string, { pattern: boolean; values: string[] }> = {
+  cat: { pattern: false, values: [] },
+  nl: { pattern: false, values: ['-b', '-d', '-f', '-h', '-i', '-l', '-n', '-s', '-v', '-w'] },
+  head: { pattern: false, values: ['-n', '-c', '--lines', '--bytes'] },
+  tail: { pattern: false, values: ['-n', '-c', '--lines', '--bytes'] },
+  less: { pattern: false, values: ['-p', '-P', '-x', '-z', '-h', '-j', '-b'] },
+  more: { pattern: false, values: ['-n', '-p'] },
+  bat: { pattern: false, values: ['-l', '-r', '-m', '-H', '--language', '--line-range'] },
+  sed: { pattern: true, values: ['-e', '-f', '-l', '--expression', '--file'] },
+  grep: {
+    pattern: true,
+    values: ['-e', '-f', '-m', '-A', '-B', '-C', '--regexp', '--file', '--max-count'],
+  },
+  rg: { pattern: true, values: ['-e', '-f', '-m', '-A', '-B', '-C', '-g', '-t', '-T', '--glob'] },
+};
+READERS.egrep = READERS.fgrep = READERS.grep!;
+READERS.batcat = READERS.bat!;
+
+/**
+ * The files a shell command reads with cat, head, tail, less, more, nl, bat, sed or grep (and
+ * rg), as absolute paths. Conservative on purpose: it follows `cd DIR` and `bash -c '...'` inside
+ * the one command, skips any word with a variable, command substitution or glob, and does not
+ * count `sed -i` (an edit). Anything it cannot read with certainty is left out, so a miss costs the
+ * agent one more read and a wrong guess never counts as a read that did not happen.
+ */
+export function shellReadFiles(command: unknown, cwd: string, depth = 0): string[] {
+  if (typeof command !== 'string') return [];
+  const found: string[] = [];
+  let dir = cwd;
+  const literal = (word: string): string | undefined => {
+    if (/[$`*?[\]{}()<>|&;!\\]/.test(word) || word === '-' || word === '') return undefined;
+    if (word === '~' || word.startsWith('~/'))
+      return path.resolve(dir, path.join(os.homedir(), word.slice(1)));
+    if (word.startsWith('~')) return undefined;
+    return path.resolve(dir, word);
+  };
+  for (const words of commandArgvs(command)) {
+    const head = words[0]!.split('/').pop()!;
+    const args = words.slice(1);
+    if (head === 'cd') {
+      const target = args.find((a) => !a.startsWith('-'));
+      const next = target === undefined ? undefined : literal(target);
+      if (next) dir = next;
+      continue;
+    }
+    if (SHELLS.has(head)) {
+      const at = args.findIndex((a) => /^-[a-z]*c$/.test(a));
+      if (depth < 2 && at >= 0 && args[at + 1])
+        found.push(...shellReadFiles(args[at + 1], dir, depth + 1));
+      continue;
+    }
+    const spec = READERS[head];
+    if (!spec) continue;
+    const operands: string[] = [];
+    let patternGiven = false;
+    let edits = false;
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i]!;
+      if (arg === '--') {
+        operands.push(...args.slice(i + 1));
+        break;
+      }
+      if (!arg.startsWith('-') || arg === '-') {
+        operands.push(arg);
+        continue;
+      }
+      if (head === 'sed' && (/^-[A-Za-z]*i/.test(arg) || arg.startsWith('--in-place')))
+        edits = true;
+      const name = arg.startsWith('--') ? arg.split('=')[0]! : arg.slice(0, 2);
+      if (spec.values.includes(name)) {
+        // -e/-f give the pattern or script themselves, attached (-ePATTERN, --regexp=P) or as the next word.
+        if (
+          name === '-e' ||
+          name === '-f' ||
+          name === '--regexp' ||
+          name === '--file' ||
+          name === '--expression'
+        )
+          patternGiven = true;
+        const attached = arg.startsWith('--') ? arg.includes('=') : arg.length > 2;
+        if (!attached) i++;
+      }
+    }
+    if (edits) continue;
+    if (spec.pattern && !patternGiven) operands.shift();
+    for (const operand of operands) {
+      const file = literal(operand);
+      if (file) found.push(file);
+    }
+  }
+  return [...new Set(found)];
+}
+
+/** A Codex apply_patch response starts `Exit code: N`; a patch that did not apply must not count as an edit. */
+function patchFailed(response: unknown): boolean {
+  return typeof response === 'string' && /^Exit code: (?!0\b)/.test(response);
+}
+
+/** A file a finished shell command read. Codex's shell response is only the command's output, with
+ * no exit code, so a path that is not a readable file now (a read that failed) does not count. */
+function isReadableFile(file: string): boolean {
+  try {
+    fs.accessSync(file, fs.constants.R_OK);
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
   }
 }
 
@@ -135,31 +249,43 @@ export function applyPatchFiles(
 
 /** Every Claude hook input a CLI hook payload stands for. A Codex apply_patch edits several files
  * at once, and the research checks look at one path per Write or Edit call, so it becomes one
- * input per file. Anything else is the single input claudeHookInput returns. */
+ * input per file (before the call and after it). A Codex shell command that has finished and read
+ * files becomes its own PostToolUse plus one Read PostToolUse per file: the writing gate and the
+ * file holds know only Read, and Codex reads files through the shell. Anything else is the single
+ * input claudeHookInput returns. */
 export function claudeHookInputs(format: HookFormat, payload: any): HookInput[] {
   const base = claudeHookInput(format, payload);
   if (!base) return [];
-  const patch = (payload as { tool_input?: { command?: unknown } }).tool_input?.command;
-  if (
-    format !== 'codex' ||
-    base.hook_event_name !== 'PreToolUse' ||
-    payload.tool_name !== 'apply_patch' ||
-    typeof patch !== 'string'
-  )
-    return [base];
-  const files = applyPatchFiles(patch);
-  if (!files.length) return [base];
-  return files.map(
-    (file) =>
-      ({
-        ...base,
-        tool_name: file.kind === 'update' ? 'Edit' : 'Write',
-        tool_input:
-          file.kind === 'update'
-            ? { file_path: file.path, old_string: file.removed, new_string: file.added }
-            : { file_path: file.path, content: file.added },
-      }) as HookInput,
-  );
+  if (format !== 'codex') return [base];
+  const event = base.hook_event_name;
+  if (event !== 'PreToolUse' && event !== 'PostToolUse') return [base];
+  const toolInput = (payload as { tool_input?: { command?: unknown } }).tool_input;
+  if (payload.tool_name === 'apply_patch' && typeof toolInput?.command === 'string') {
+    if (event === 'PostToolUse' && patchFailed(payload.tool_response)) return [base];
+    const files = applyPatchFiles(toolInput.command);
+    if (!files.length) return [base];
+    return files.map(
+      (file) =>
+        ({
+          ...base,
+          tool_name: file.kind === 'update' ? 'Edit' : 'Write',
+          tool_input:
+            file.kind === 'update'
+              ? { file_path: file.path, old_string: file.removed, new_string: file.added }
+              : { file_path: file.path, content: file.added },
+        }) as HookInput,
+    );
+  }
+  if (event === 'PostToolUse' && payload.tool_name === 'Bash') {
+    const reads = shellReadFiles(toolInput?.command, base.cwd).filter(isReadableFile);
+    return [
+      base,
+      ...reads.map(
+        (file) => ({ ...base, tool_name: 'Read', tool_input: { file_path: file } }) as HookInput,
+      ),
+    ];
+  }
+  return [base];
 }
 
 // As in Claude Code: a plain name matches only that tool, `Edit|Write` either of them.
@@ -204,8 +330,16 @@ function allowForm(format: HookFormat): object | null {
   return format === 'gemini' ? { decision: 'allow' } : null;
 }
 
-/** What the CLI's hook command prints, or null for nothing. Both CLIs take refusals only: Gemini
- * drops the rest of the result, and Codex rejects any allow, so it gets output only for a deny. */
+/** The advisory text a check attached to its result, if any. */
+function advice(result: SyncHookJSONOutput): string | undefined {
+  const text = (result.hookSpecificOutput as { additionalContext?: unknown } | undefined)
+    ?.additionalContext;
+  return typeof text === 'string' && text ? text : undefined;
+}
+
+/** What the CLI's hook command prints, or null for nothing. Gemini takes refusals only: it drops the
+ * rest of the result. Codex takes a refusal, or advice as `additionalContext` with no decision (it
+ * rejects any allow, ask or rewrite), so a warning reaches the model and the call goes on. */
 export function relayOutput(
   format: HookFormat,
   input: HookInput,
@@ -217,14 +351,18 @@ export function relayOutput(
   const deny = input.hook_event_name === 'PreToolUse' && specific?.permissionDecision === 'deny';
   const reason = specific?.permissionDecisionReason || 'Refused by a Clawstrum check.';
   if (format === 'gemini') return deny ? { decision: 'deny', reason } : { decision: 'allow' };
-  if (!deny) return null;
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: reason,
-    },
-  };
+  if (deny)
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: reason,
+      },
+    };
+  const additionalContext = advice(result);
+  if (!additionalContext || !['PreToolUse', 'PostToolUse'].includes(input.hook_event_name))
+    return null;
+  return { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext } };
 }
 
 /** The socket reply: {output} for the client to print (null: print nothing), or {error}. */
@@ -248,7 +386,9 @@ async function answer(
       }),
     );
     let output: object | null = allowForm(format);
-    // The first refusal ends the call; otherwise the answer is the last input's.
+    const advisories: string[] = [];
+    // The first refusal ends the call. Otherwise Gemini gets the last input's answer, and Codex gets
+    // every different advisory text the checks returned, joined (one call can stand for several inputs).
     for (const input of inputs) {
       const toolUseId = (input as { tool_use_id?: string }).tool_use_id;
       const result = await Promise.race([
@@ -257,8 +397,19 @@ async function answer(
       ]);
       output = relayOutput(format, input, result);
       const specific = result.hookSpecificOutput as { permissionDecision?: string } | undefined;
-      if (specific?.permissionDecision === 'deny') break;
+      if (specific?.permissionDecision === 'deny') return { output };
+      const text = advice(result);
+      if (text && !advisories.includes(text)) advisories.push(text);
     }
+    if (format === 'codex')
+      output = advisories.length
+        ? {
+            hookSpecificOutput: {
+              hookEventName: inputs[0]!.hook_event_name,
+              additionalContext: advisories.join('\n\n'),
+            },
+          }
+        : null;
     return { output };
   } catch (error) {
     // Only the message: the tool input can hold secrets.

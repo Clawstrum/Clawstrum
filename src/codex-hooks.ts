@@ -4,11 +4,15 @@ import { ProviderFailure } from './accounts.js';
 import { packageRoot } from './apply.js';
 
 /**
- * Clawstrum's tool checks reach Codex through Codex's own PreToolUse hook. Codex starts
- * dist/hook-client.js before each tool call; the client hands the call to the run's relay
- * (hook-relay.ts) and prints the answer. Codex runs a hook only once it is marked trusted, and it
- * skips an untrusted one without saying so, so the trust is written before a thread is started.
+ * Clawstrum's tool checks reach Codex through Codex's own PreToolUse and PostToolUse hooks. Codex
+ * starts dist/hook-client.js before and after each tool call; the client hands the call to the run's
+ * relay (hook-relay.ts) and prints the answer. Both events run the same command: the payload says
+ * which event it is. Codex runs a hook only once it is marked trusted, and it skips an untrusted one
+ * without saying so, so the trust is written before a thread is started.
  */
+
+/** The two Codex hook events Clawstrum wires, as `hooks/list` names them. */
+const HOOK_EVENTS = ['preToolUse', 'postToolUse'];
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -19,13 +23,16 @@ export function codexHookCommand(root = packageRoot()): string {
   return `${shellQuote(process.execPath)} ${shellQuote(path.join(root, 'dist', 'hook-client.js'))} --format codex`;
 }
 
-/** The app-server flags that load the hook: the feature switch and one PreToolUse entry. */
+/** The app-server flags that load the hooks: the feature switch, a PreToolUse entry and a PostToolUse entry. */
 export function codexHookArgs(command: string): string[] {
+  const entry = `[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=60}]}]`;
   return [
     '--enable',
     'hooks',
     '-c',
-    `hooks.PreToolUse=[{hooks=[{type="command",command=${JSON.stringify(command)},timeout=60}]}]`,
+    `hooks.PreToolUse=${entry}`,
+    '-c',
+    `hooks.PostToolUse=${entry}`,
   ];
 }
 
@@ -51,7 +58,7 @@ async function clawstrumHooks(
       if (
         hook?.handlerType === 'command' &&
         hook.command === command &&
-        hook.eventName === 'preToolUse'
+        HOOK_EVENTS.includes(hook.eventName)
       )
         found.push(hook);
   return found;
@@ -120,10 +127,11 @@ export async function trustCodexHooks({
 }): Promise<void> {
   const needsTrust = (hook: ListedHook) => !['trusted', 'managed'].includes(hook.trustStatus);
   const hooks = await clawstrumHooks(request, cwd, command);
-  if (!hooks.length)
+  const missing = HOOK_EVENTS.filter((event) => !hooks.some((hook) => hook.eventName === event));
+  if (missing.length)
     throw new ProviderFailure(
       'fatal',
-      "Codex did not list Clawstrum's tool-check hook, so the checks cannot run",
+      `Codex did not list Clawstrum's ${missing.join(' and ')} tool-check hook, so the checks cannot run`,
     );
   const pending = hooks.filter(needsTrust);
   if (!pending.length) return;
@@ -149,6 +157,6 @@ export async function trustCodexHooks({
   if (left.length)
     throw new ProviderFailure(
       'fatal',
-      `Codex still reports Clawstrum's tool-check hook as ${left[0]!.trustStatus} after its trust was written, so the checks cannot run`,
+      `Codex still reports Clawstrum's ${left[0]!.eventName} tool-check hook as ${left[0]!.trustStatus} after its trust was written, so the checks cannot run`,
     );
 }
