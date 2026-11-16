@@ -2,39 +2,44 @@
 
 ## Getting started
 
-- [README](../README.md): what Clawstrum is, requirements and install.
-- [Setup](setup.md): `clawstrum setup`, the Discord bot, accounts and manual setup.
-- [Subscriptions](subscriptions.md): Claude, Codex and Gemini accounts, switching and quota.
+| Guide                             | Covers                                                     |
+| --------------------------------- | ---------------------------------------------------------- |
+| [README](../README.md)            | What Clawstrum is, requirements and install                |
+| [Setup](setup.md)                 | Guided and manual setup, the Discord bot, provider sign-in |
+| [Subscriptions](subscriptions.md) | Claude, Codex and Gemini accounts, switching models, quota |
 
 ## Using it
 
-- [Operations](operations.md): running the daemon as a service, state, inspection, backup and recovery.
-- [Workflows](workflows.md): live snapshots, planned restarts, linting, condition watches and self-review.
-- [Research](research.md): papers and citations, research notes, subagents, Slurm jobs and their configuration.
-- [Research continuity](research-continuity.md): resource accounting, steering subagents, compaction recovery and note revisions.
-- [Subagent orchestration](orchestration.md): when and how the lead delegates, and how subagents report back.
-- [Channel groups](groups.md): shared instructions and boards across related channels.
-- [Live steering](live-steering.md): how messages sent during a running turn reach the agent.
+| Guide                             | Covers                                                                 |
+| --------------------------------- | ---------------------------------------------------------------------- |
+| [Memory](memory-lifecycle.md)     | Instruction and memory files, history, background passes, call limits  |
+| [Research tools](research.md)     | Literature search, papers, citations, research notes, Slurm jobs       |
+| [Subagents](orchestration.md)     | When the lead delegates, roles, limits, steering, checker and reviewer |
+| [Workflows](workflows.md)         | Condition watches, decision, prose and figure linting, research skills |
+| [Channel groups](groups.md)       | Shared instructions and a board across related channels                |
+| [Live steering](live-steering.md) | Messages sent while the agent is working                               |
+| [Operations](operations.md)       | Running as a service, state, backups, upgrades, restarts, recovery     |
 
 ## Customizing
 
-- [Customizing Clawstrum](customize.md): instructions, skills, tool servers, hooks, code, sandbox, voice notes and working alone.
-- [Configuration](configuration.md): every `config.json` field, default and limit.
-- [CLI](cli.md): every `clawstrum` command.
-- [Instructions](instructions.md): `AGENTS.md` files shared by Claude, Codex and Gemini, and live refresh.
-- [Hooks and gates](hooks-and-gates.md): citation checks, reply review and validation modes.
-- [Jev](jev.md): the optional decision service, or a chat model on OpenRouter in its place.
+| Guide                                 | Covers                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [Customizing](customize.md)           | Instructions, skills, tool servers, hooks, code, sandbox, voice notes, working alone, self-review |
+| [Configuration](configuration.md)     | `config.json` fields, defaults and limits                                                         |
+| [CLI](cli.md)                         | `clawstrum` commands                                                                              |
+| [Instructions](instructions.md)       | `AGENTS.md` files, the base prompt, imports, live refresh                                         |
+| [Hooks and gates](hooks-and-gates.md) | Validation modes, tool-call checks, outgoing reply review                                         |
+| [Jev decisions](jev.md)               | The optional decision service, or a chat model on OpenRouter in its place                         |
 
 ## Internals
 
-- [Architecture](architecture.md): processes, ownership, accounts, delivery and recovery.
-- [System prompt](system-prompt.md): what the agent's context contains and in what order.
-- [Provider instructions](provider-instructions.md): exact composition of the instructions sent to each provider.
-- [Memory lifecycle](memory-lifecycle.md): `AGENTS.md` memory, raw history, compaction, consolidation and consistency review.
-- [Performance](performance.md): queue, preparation, compaction and delivery timing.
-- [Usage](usage.md): token use by role, activity and day.
-- [Testing](testing.md): local, package and live Discord tests.
+| Guide                                   | Covers                                                              |
+| --------------------------------------- | ------------------------------------------------------------------- |
+| [Architecture](architecture.md)         | Processes, storage, turns, accounts, delivery, scheduling, recovery |
+| [System prompt](system-prompt.md)       | A run's context, its order and size limits                          |
+| [Performance and usage](performance.md) | Turn timings, slow turns, stuck queues, token use and cost          |
+| [Testing](testing.md)                   | Local, package, live Discord and real model checks                  |
 
 ## Maintaining these guides
 
-When changing behavior, update its guide. Check config defaults against `src/config.ts` and `src/research/config.ts`, commands against `src/cli-main.ts` and `src/workflow-cli.ts`, and tool inventories against `src/mcp.ts`. Add distributable guides to the `package.json` files allowlist. Source and test links work in a checkout; the installed package has `dist/` instead.
+When you change behavior, update its guide. Check config defaults against `src/config.ts` and `src/research/config.ts`, commands against `src/cli-main.ts` and `src/workflow-cli.ts`, and agent tools against `src/mcp.ts`. Add a new guide to the `files` list in `package.json`. Source and test links work in a checkout. The installed package has `dist/` instead.

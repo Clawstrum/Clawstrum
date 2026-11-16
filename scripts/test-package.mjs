@@ -36,7 +36,7 @@ try {
   const output = command(npm, ['pack', '--json'], { cwd: root });
   const packed = JSON.parse(output.slice(output.indexOf('[\n')))[0];
   for (const document of [
-    'research-continuity',
+    'memory-lifecycle',
     'performance',
     'customize',
     'configuration',
@@ -266,7 +266,7 @@ try {
   assert.equal(usageProfile.observed.roles.find((row) => row.role === 'lead').invocations, 1);
   assert.equal(usageProfile.observed.roles.find((row) => row.role === 'explorer').invocations, 1);
   assert.equal(usageProfile.observed.roles.find((row) => row.role === 'checker').invocations, 0);
-  assert.ok(fs.existsSync(path.join(installed, 'docs', 'usage.md')));
+  assert.ok(fs.existsSync(path.join(installed, 'docs', 'performance.md')));
   assert.equal(profiling.scope, session.id);
   assert.ok(Array.isArray(profiling.runs));
   assert.ok('heartbeatAgeMs' in profiling.health);

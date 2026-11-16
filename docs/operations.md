@@ -1,36 +1,29 @@
 # Operations
 
-Run a single daemon per state directory. Keep the SQLite database on a local disk. Do not place a live WAL database on NFS or run two hosts against it. Agents can still read and work on mounted project storage using their normal host tools.
+Run one daemon per state directory. Keep the SQLite database on a local disk, not on NFS, and never run two hosts against it.
 
-Temporary SQLite `BUSY` contention during a daemon tick is logged as `database_busy` and retried on the next tick, without shutting down active turns. Other database errors remain failures. Repeated contention still needs investigation; it is not evidence that the storage arrangement is healthy.
+## State
 
-Stopped-turn notices identify the request or scheduled task, provider/account, actual error and saved run ID. They go into the affected user message's Discord thread; scheduled work uses the most recent user-message thread with an explicit task label. Missing thread support falls back to the channel so actionable failures remain visible. Known environment credentials and common token formats are redacted from the notice; full errors remain in private diagnostics. A provider rejection is not automatically retried or routed around the provider's safeguards. Scheduled reviews should inspect observable conversation evidence, keep working notes in private reports, and return `CLAWSTRUM_QUIET` when no notification is warranted; `<internal>` tags do not suppress delivery.
+`CLAWSTRUM_HOME` is the state root, `~/.clawstrum` by default. It need not be the source checkout.
 
-## Performance and health
+| State                                             | Location                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Sessions, queues, runs, events, research records  | `clawstrum.db`                                                                 |
+| Channel `AGENTS.md`, history, skills, artifacts   | `channels/<discord-channel-id>/`, or wherever `clawstrum status` says          |
+| Provider logins and native transcripts            | Each account's `accounts[].home`                                               |
+| Portable history snapshots (not full transcripts) | `transcripts/`                                                                 |
+| Files and diagnostics                             | Workspace `attachments/`, state `outgoing/` and `diagnostics/`                 |
+| Research and self-review artifacts                | State and workspace `research/`, state `reviews/`                              |
+| Accounts                                          | `runtime/accounts.json` (mode 0600, may hold tokens) and `runtime/ACCOUNTS.md` |
+| Backups                                           | Only where you point `backup` or `backup live`                                 |
 
-`clawstrum performance [SESSION] --limit 20` reports recent message, provider and delivery timings plus current queue and daemon health. See [performance profiling](performance.md) for metrics, monitoring commands and limitations. It is read-only and makes no model calls.
+Edits to the account files or to `accounts` in `config.json` reach the running daemon within seconds. See [subscriptions](subscriptions.md#account-registry).
 
-## State and session storage
+An optional `STORAGE.json` in the state root moves the database and daemon lock. It needs `host` equal to Node's `os.hostname()`, an absolute `directory`, and `journalMode` set to `WAL` or `DELETE`. Every open checks the host first. Writing the file moves nothing, so move existing data yourself with every writer stopped. WAL on local disk is the supported default. With DELETE mode on a network filesystem, you must check its locking and keep every writer on the owning host.
 
-`CLAWSTRUM_HOME` defaults to `~/.clawstrum` and selects the configuration/state root; it need not be the source checkout. The default locations are:
+Temporary SQLite `BUSY` errors log `database_busy` and retry on the next tick. If they keep coming, check the storage.
 
-| State                                                                | Location / way to find it                                                                                                            |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Durable sessions, inputs, runs, events, outbox and research records  | `CLAWSTRUM_HOME/clawstrum.db`                                                                                                        |
-| Channel AGENTS.md instructions/MEMORY, history, skills and artifacts | `channels/<discord-channel-id>/`; `clawstrum status` reports the actual stored workspace, which migrations may place elsewhere       |
-| Native provider credentials and transcripts                          | Each configured `accounts[].home`; Claude stores project JSONL under `projects/`, while provider-native layouts remain runtime-owned |
-| Portable normalized history                                          | `CLAWSTRUM_HOME/transcripts/`; bounded handoff snapshots, not complete native transcripts                                            |
-| Incoming/outgoing files and diagnostics                              | Workspace `attachments/`, state `outgoing/` and `diagnostics/`                                                                       |
-| Research and self-review artifacts                                   | State `research/`, workspace `research/`, and state `reviews/` by default                                                            |
-| Backups                                                              | Explicit destination chosen for `backup` or `backup live`; no universal automatic backup location                                    |
-
-An optional `CLAWSTRUM_HOME/STORAGE.json` is a deployment policy separate from `config.json`. It requires `host` equal to Node's exact `os.hostname()`, an absolute `directory` for the database and daemon mutex, and `journalMode` equal to `WAL` or `DELETE`. Store opens, singleton locking and live snapshots check the host before opening the database. It does not move configuration, workspaces, provider homes or attachments. Existing data must be moved deliberately while all writers are stopped; writing this file is not a migration command.
-
-A host pin prevents accidental CLI access from another host; it is not a distributed lease or an access-control boundary. Local disk with WAL remains the supported default. DELETE mode is an explicit deployment accommodation, not evidence that an arbitrary network filesystem safely supports SQLite. Operators must establish filesystem locking/durability and keep every writer on the owning host.
-
-Offline backup puts its database snapshot at the backup root even if live storage was redirected. On restore, explicitly map that snapshot back to the configured storage directory and review the copied `STORAGE.json`; merely starting from a restored tree can otherwise reopen the old absolute database location. Back up external workspace/profile trees separately.
-
-## Long-running service
+## Running as a service
 
 On Linux with systemd:
 
@@ -42,91 +35,101 @@ systemctl --user enable --now clawstrum
 journalctl --user -u clawstrum -f
 ```
 
-The generated service contains absolute executable/state paths, restart-on-failure, a five-second restart delay, disabled start-rate limiting (`StartLimitIntervalSec=0`) and `KillMode=control-group`. It does not add a filesystem sandbox. For macOS, use a user service manager or keep `clawstrum start` in a supervised terminal; a launchd installer is not shipped in 0.1.0. On clusters, place the service on an appropriate persistent/allocated host and choose either a node-local state directory with an explicit backup plan or, as the guided setup does, a home on an NFS version 4 drive with a `STORAGE.json` that pins the database to the login node in DELETE journal mode. If the daemon runs on a login node shared with other users, set `runtime.shellCpuSeconds` (e.g. `300`): every Claude agent shell command then runs under that soft per-process CPU limit and a process over it is killed with a note to submit a job. `sbatch`, `srun` and `salloc` are wrapped to lift the limit, because SLURM copies resource limits into jobs. Codex shell commands are not covered.
+The unit restarts on failure after five seconds, with no start-rate limit and `KillMode=control-group`. It sets `CLAWSTRUM_SUPERVISED=1` and adds no sandbox. Stop Clawstrum through the service manager.
 
-Without systemd user services (macOS, and cluster login nodes that do not allow them), run the daemon in tmux under a restart loop that exports `CLAWSTRUM_SUPERVISED=1`, restarts after a non-zero exit with a five-second delay like the unit (75 is a requested restart) and stops on exit 0 or Ctrl+C. The guided setup writes this loop to `CLAWSTRUM_HOME/start-tmux.sh` with `PATH` and `CLAWSTRUM_HOME` written out, because a tmux server started earlier gives new sessions its own environment. A tmux session does not survive a reboot of its host; run the script again there.
+Without systemd user services (macOS, many cluster login nodes), run the daemon in tmux under a restart loop that exports `CLAWSTRUM_SUPERVISED=1`, restarts after a non-zero exit with a five-second delay (75 is a requested restart) and stops on exit 0 or Ctrl+C. The guided setup writes this loop to `CLAWSTRUM_HOME/start-tmux.sh`. Run it again after the host reboots.
 
-A process marked `active` by systemd can still be unhealthy: check the daemon heartbeat with `clawstrum doctor`. On a fatal error, Clawstrum stops intake, interrupts subagents so their progress can be saved/requeued, awaits Discord shutdown and accepted handlers, and closes SQLite. The `start` command then explicitly exits even if an SDK leaves socket handles alive, allowing the service manager to restart it. Cleanup has a 25-second deadline; a stalled cleanup logs `daemon_shutdown_timeout` and exits with failure. Abrupt termination can leave work marked running; startup recovers that state and Discord history, rather than declaring it completed. A synchronous event-loop or filesystem stall can prevent this in-process timer from firing; this is not an external watchdog. Normal SDK shard errors are logged separately as `discord_shard_error`; an unhandled error still triggers fatal recovery, with a timestamp and stack for diagnosis.
+On a cluster, the guided setup puts the home on an NFS version 4 drive, with a `STORAGE.json` that pins the database to the login node in DELETE mode. On a login node shared with others, set `runtime.shellCpuSeconds` (for example `300`). Claude agent shell commands then get that soft CPU limit per process, and a process over it is killed with a note to submit a job. `sbatch`, `srun` and `salloc` lift the limit. Codex shell commands are not covered.
 
-For an external check, `clawstrum service health --output ~/.config/systemd/user` writes a timer that runs `clawstrum doctor --notify` every five minutes (`--interval-seconds` to change it). It runs the database health checks plus free space on the state directory's filesystem and, when `STORAGE.json` puts the database on another one, on that filesystem too (each fails below 1 GiB or 2 %) and posts to `discord.noticeChannelId` through the Discord HTTP API, so it works while the daemon is down. It posts when the set of failing checks changes and once when they all pass again. The integrity scan and provider sign-in probes stay with plain `clawstrum doctor`.
+On a fatal error the daemon requeues work and exits non-zero within 25 seconds (`daemon_shutdown_timeout` if cleanup stalls). By default a turn stops after ten minutes of silence or two hours in total.
 
-Uncaught daemon exceptions/rejections trigger cleanup and a nonzero exit for supervision; the service does not continue in an unknown state. Subagent uncaught failures are reported over IPC before exit and process-group cleanup. SIGINT/SIGTERM abort active SDK calls and return unfinished input to the queue. Subagents have bounded abort/TERM/KILL cleanup; the default silence deadline is ten minutes and the absolute turn deadline is two hours. Interrupted partial text and private diagnostic snapshots remain in state. Stop through the service manager so it can clean up the process group. Detached commands deliberately started by an agent may outlive its turn; stopping a conversation is not a job-cancellation primitive.
+### Health checks
+
+systemd can call an unhealthy daemon `active`. `clawstrum doctor` checks the heartbeat, queues, schedules, failed deliveries, permissions and sign-ins.
+
+`clawstrum service health --output ~/.config/systemd/user` writes a timer that runs `clawstrum doctor --notify` every five minutes (`--interval-seconds` to change). It runs the database checks and checks free space where the state and database live, failing below 1 GiB or 2 %. It posts to `discord.noticeChannelId` through Discord's HTTP API, so it works while the daemon is down, when the set of failures changes and once when all pass again.
+
+`clawstrum performance [SESSION] --limit 20` shows recent timings and the queue without a model call. See [performance](performance.md). Memory reviews log `memory_review_completed` or `memory_review_deferred`. Their limits are in [memory](memory-lifecycle.md#background-passes) and their settings under `runtime.memoryReview` in [configuration](configuration.md).
 
 ## Inspect and recover
 
 ```sh
-clawstrum status                 # list session IDs and workspaces
-clawstrum status SESSION
-clawstrum account list                           # includes how each account is authenticated, never a value
-clawstrum account test ACCOUNT [--model MODEL]   # one short prompt through the daemon's own adapter
-clawstrum switch SESSION ACCOUNT [--model MODEL|default]   # applies without a restart
+clawstrum status                 # session IDs and workspaces
+clawstrum status SESSION         # last run and error, queue, failed deliveries
+clawstrum account list           # quota, cooldowns, how each account signs in
+clawstrum account test ACCOUNT [--model MODEL]
+clawstrum switch SESSION ACCOUNT [--model MODEL|default]   # no restart
 clawstrum tasks list
 clawstrum tasks history TASK_ID
 clawstrum export SESSION conversation.json
 ```
 
-`status` shows the last run outcome and error, queue counts and failed delivery count. Provider quota usage and account cooldowns are in `account list`; model-specific cooldowns live in the bucket observations, so account-wide cooldown alone is not a complete availability signal. Run exports include route and executable-version events. Successful scheduler dispatch is distinct from completion of its resulting work: inspect the associated inbox/run outcome.
+`account list` shows account-wide cooldowns, but one model can be in cooldown on its own. When a turn stops, Clawstrum posts the request, account, error and run ID in the message's thread, with known secrets redacted. The full error stays in `diagnostics/`. A provider refusal is not retried.
 
-| Situation                                                           | Action                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Profile needs login                                                 | `clawstrum account login ACCOUNT`, then `clawstrum resume SESSION`. An account with `tokenEnv` or a stored `token` is not logged in this way: check it with `clawstrum account test ACCOUNT`; replace a stored token with `printf %s "$TOKEN" \| clawstrum account set-token ACCOUNT` |
-| Known-good account remains in cooldown                              | `clawstrum account reset ACCOUNT`, then resume the conversation                                                                                                                                                                                                                       |
-| Provider-native session is missing                                  | The engine retries once with portable context                                                                                                                                                                                                                                         |
-| Prompt is too large                                                 | Shorten SELF/skills/checkpoint as appropriate, reset the native session and resume                                                                                                                                                                                                    |
-| Model request failed repeatedly                                     | Transient failures retry every five minutes after the fast budget; inspect status, switch or stop as needed                                                                                                                                                                           |
-| Discord delivery has failed                                         | Transient failures retry for 24 hours with delays capped at five minutes; permanent HTTP 4xx errors (except 408/429) fail immediately. Fix the cause, then `clawstrum retry-delivery SESSION`                                                                                         |
-| Active model work should stop                                       | `/clawstrum action:stop` or `clawstrum stop SESSION`                                                                                                                                                                                                                                  |
-| Work should continue on another account, or on another model of one | `/clawstrum action:switch account:ID [model:M]` or `clawstrum switch SESSION ID [--model M]`; no restart                                                                                                                                                                              |
-| Another host owns the daemon lock                                   | Check that host and its process; never remove the daemon-lock.db mutex to bypass ownership                                                                                                                                                                                            |
+| Situation                         | Action                                                                                                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account needs login               | `clawstrum account login ACCOUNT`, then `clawstrum resume SESSION`. A token account can't log in: check it with `account test`, replace it with `printf %s "$TOKEN" \| clawstrum account set-token ACCOUNT` |
+| Working account stuck in cooldown | `clawstrum account reset ACCOUNT`, then resume                                                                                                                                                              |
+| Prompt too large                  | Shorten instructions, skills or memory, `reset`, then resume                                                                                                                                                |
+| Model request keeps failing       | After the fast retries it retries every five minutes. Switch or stop as needed                                                                                                                              |
+| Discord delivery failed           | Retries for 24 hours, at most five minutes apart. HTTP 4xx other than 408 and 429 fails at once. Fix the cause, then `clawstrum retry-delivery SESSION`                                                     |
+| Stop model work                   | `/clawstrum action:stop` or `clawstrum stop SESSION`                                                                                                                                                        |
+| Continue on another account       | `/clawstrum action:switch account:ID [model:M]` or `clawstrum switch SESSION ID [--model M]`                                                                                                                |
+| Another host holds the lock       | Check that host. Never delete `daemon-lock.db`                                                                                                                                                              |
 
-Provider errors and normalized tool activity are local records, and may contain private work details. Export only conversations you intend to share. Authentication material stays in private provider homes and `.env`; the release package does not include them.
+`stop` doesn't cancel background commands, Slurm jobs or watches. See [research tools](research.md). A reply that is only `CLAWSTRUM_QUIET` is never delivered.
 
-Accounts: the private list is `runtime/accounts.json` (mode 0600; may hold tokens, so back it up as private) and the owner's rules are `runtime/ACCOUNTS.md`; see [subscription support](subscriptions.md#private-account-registry). A change to either, or to `config.json` `accounts`, reaches the running daemon within seconds; the log lines are `accounts_reloaded` (ids only) and `accounts_reload_failed` (the old list stays). To move an existing installation to the registry: `clawstrum account import --move-tokens` while the daemon runs, check `clawstrum account list`, then write `ACCOUNTS.md`.
+Lead turns have no tool-turn cap by default (`runtime.scheduledMaxTurns: 0`). A positive value applies to every task-only lead turn, and hitting it saves a resumable failure. Change the value, restart, then `resume`.
 
-## Backup and upgrade
+## Backup
 
-For live SQLite snapshots, optional backup timers and a coordinated restart that lets current work finish, see [operations and workflows](workflows.md). Live snapshots cover the database; the offline procedure below covers the state tree as well.
+For a full backup, stop the service, run `clawstrum backup /absolute/new/backup-directory`, then start it again. It refuses to run beside a live daemon. It copies the state tree with a database snapshot, but not account homes, workspaces or symlink targets outside it. Back those up separately. Restore to the same absolute path. The database snapshot sits at the backup root even if `STORAGE.json` moved it, so copy it back to the configured directory. The backup holds credentials, so keep it private.
 
-For a consistent backup, stop the service, run `clawstrum backup /absolute/new/backup-directory`, then restart. The command refuses a live daemon, snapshots SQLite with `VACUUM INTO`, and atomically publishes the copied state tree. Restore to the original absolute state path, or deliberately migrate stored paths. External account/workspace paths and symlink targets are outside this snapshot; quiesce their writers and back them up separately. Include the database, workspaces, account homes, outgoing spool, identity and configuration. Treat that backup as private because it contains credentials and conversations. A live filesystem copy of SQLite and its WAL is not the documented backup procedure.
+### Live database snapshots
 
-To upgrade, install a tested package version, stop the service, back up state, update the executable path in the service if necessary, and restart. Check the ready log for the running version, then send a simple test request. A successful build is not evidence that the running service loaded it.
+These copy only `clawstrum.db` while the daemon runs. They need Node 22.16 or newer.
 
-The working tree uses schema 6, which adds the last active model to each session. Schema upgrades require the daemon to be stopped; earlier memory-layout migrations still need their documented preparation. Unsupported versions are rejected before schema writes. Rollback means restoring the complete pre-upgrade backup with the matching binary. Do not point an older binary at upgraded state.
+```sh
+clawstrum backup live /absolute/private/backups --keep-last 12 --keep-days 7
+clawstrum backup verify /absolute/private/backups/snapshot-TIMESTAMP-UUID
+```
 
-Build in an isolated checkout/worktree. `npm test` and `npm pack` also invoke the build, so running either in a live checkout can replace subagent code while the daemon retains older modules and an older database schema. The `prebuild` check uses daemon ownership metadata from the colocated `runtime` directory or `CLAWSTRUM_HOME` (default `~/.clawstrum`) to reject overwriting the matching active build. New daemon metadata records its entrypoint, allowing an isolated build to inherit the live state environment without being blocked. Legacy colocated metadata and Linux process entrypoints are supported; remote owners of shared builds are treated as active until stopped. This check does not intercept direct `tsc`, arbitrary filesystem writes, or an undiscoverable legacy custom state directory. Deploy a complete tested artifact, migrate while stopped, then verify the replacement PID and readiness.
+Each snapshot has `clawstrum.db` and a `SNAPSHOT.json` with its checksum. `latest.json` names the newest. Clawstrum keeps the newest `--keep-last` snapshots plus one per UTC date for the last `--keep-days` dates, and deletes only snapshots of this database. In DELETE mode, writers wait up to 60 seconds during the copy. Use one backup directory per install.
 
-`clawstrum gc --before 2026-01-01` previews old attachment/spool files, diagnostic snapshots and normalized transcript artifacts; add `--apply` to remove them with the daemon stopped. Pending/failed input and delivery files are protected. Database history and provider-native transcripts are retained. External workspace directories and symlink targets are excluded from cleanup. Back up artifacts you want to keep before deliberate transfer cleanup.
+To take one every five minutes on Linux:
 
-## Turn limits
+```sh
+clawstrum service backup --directory /absolute/private/backups \
+  --interval-seconds 300 --keep-last 12 --keep-days 7 \
+  --output ~/.config/systemd/user
+systemctl --user daemon-reload
+systemctl --user enable --now clawstrum-backup.timer
+```
 
-Lead turns, including scheduled tasks and internal recovery tasks, have no tool-turn cap by default: `runtime.scheduledMaxTurns=0`. If a deployment sets a positive value, it applies to every task-only lead turn, including denial recovery and research-result wakes. Claude enforces native turns; Codex counts completed tool items and may exceed the limit by one. An explicitly configured limit produces a saved, resumable failure with a specific limit notice, not a generic fatal-error notice. It does not automatically retry and reset its own budget. Set the value to `0` to remove the cap, restart the daemon to load the configuration, and use `resume` only for work that still needs completion. Separately configured research-subagent budgets and runtime watchdogs still apply.
+Without `--output` it prints the units as JSON. Each run has 15 minutes.
 
-## Self-review
+To restore, stop every writer and timer, keep a copy of the current database, `backup verify` the snapshot, copy it to the database location and start a matching build. Check what the agent already did outside Clawstrum before replaying work.
 
-The useful part of a daily self-review is a falsifiable loop: identify an interaction failure from raw evidence, make a small change, name a measurable expectation, and verify it on later use. The optional [self-review collector and skill](workflows.md#optional-self-review) provide private evidence, configurable metrics and explicit review receipts. Guided setup schedules the nightly review in the main channel; the scope and policies of any change it makes are yours to set.
+`clawstrum gc --before 2026-01-01` previews old attachments, diagnostics and transcript snapshots. Add `--apply`, with the daemon stopped, to delete them. Pending files, database history and research evidence are kept.
 
-## Research operations
+## Upgrading
 
-`clawstrum research status SESSION --input status.json` reads durable notes/subagents/jobs/citations. Doctor reports unresolved submissions, overdue watches and stalled subagents, and checks optional tool executables when the profile is enabled. General stop cancels model subagents but does not cancel remote Slurm jobs or their watches. Use `research_cluster` action `stop-watch` to stop polling. Unknown submissions must be reconciled by their scheduler comment before adoption; never simply resubmit them. Preserve research artifacts separately when pruning other state; current GC does not delete research evidence. Full details and example inputs are in [research.md](research.md).
+Install a tested version, stop the service, back up, fix the executable path in the unit if it changed, and start. Check the version in the ready log and send a test message.
 
-## Memory lifecycle upgrades
+The database schema is 6. Upgrades need the daemon stopped. To roll back, restore the full backup with its matching build, and never point an older build at upgraded state. An install older than schema 4 first needs `clawstrum memory migrate --apply`. See [memory](memory-lifecycle.md#upgrading-an-older-install). Schema 5 adds [channel groups](groups.md).
 
-Schema 4 uses one AGENTS.md per shared/channel scope. Existing installations require an offline, resumable `memory migrate --apply` before startup. Preserve a database/document/path backup and the matching prior build; a build-only rollback cannot reverse this migration. See [the memory lifecycle migration guide](memory-lifecycle.md#existing-installations).
+Build in a separate checkout. `npm test` and `npm pack` also build and can replace code under a running daemon. A `prebuild` check refuses to overwrite the active build, but can't stop a direct `tsc`. In a source install, `clawstrum apply` builds in a copy. See [customizing](customize.md#code).
 
-## Channel groups (schema 5)
+### Planned restart
 
-Related Discord channels can share G/AGENTS.md policy and a SQLite-backed current information board under `H/groups/<id>/`. Publications refresh member context immediately at existing provider boundaries without rotating sessions. An economical subscription reviewer reconciles complete board/change inputs, preserves raw history, and sends concrete issues to Discord review threads. Membership, multiple audiences, revisions, recovery and upgrade requirements are described in [channel groups](groups.md). Existing H/W memory and channel workspaces retain their roles.
+```sh
+clawstrum restart request --drain-ms 30000 --timeout-ms 3600000
+clawstrum restart status
+clawstrum restart cancel
+```
 
-## Memory consistency maintenance
+The daemon stops starting new turns, and new messages queue. Running turns, their subagents and pending deliveries get 30 seconds by default. Then it saves interrupted work, exits with code 75, and the supervisor starts it again. `--drain-ms 0` waits for all work. If `--timeout-ms` passes first, the request lapses and work goes on. `cancel` works until shutdown starts.
 
-`runtime.memoryReview.enabled` defaults to true independently of consolidation. Claude reviews use `sonnet`; configure `runtime.memoryReview.models.codex` to enable an economical Codex maintenance route. `memory_review` requests a review or reports coverage/status. Inspect `memory_review_completed` / `memory_review_deferred` events and the corresponding raw-history records. The default debounce is 30 seconds, cooldown five minutes, fallback daily, chunks 80,000 characters, four chunks per pass and five minutes per pass. User work preempts maintenance. A successful review preserves native IDs and rotation coverage. See [memory lifecycle](memory-lifecycle.md#regular-consistency-review).
+`--wait` waits for the new daemon to be ready. An agent restarting itself should leave it off and end its turn. If the restart fails, `status` stays `restarting`.
 
-## Discord recovery and internal output
-
-Account/model notices identify the source conversation separately from their operator-channel destination. DMs use a direct-message label; channels and threads use their names and stable IDs. These labels work across guilds without relying on Discord mentions. Failed source lookups retain the ID and do not prevent delivery; retries reuse the frozen payload.
-
-Recovery reads known conversations before discovering additional threads. Up to four conversations recover concurrently, so one slow route does not block all others. Existing cursors and message IDs retain their deduplication behavior. The `discord-recovery` metadata record exposes the current phase, conversation count, start time and last phase change.
-
-A bare `CLAWSTRUM_QUIET` line is internal control text. Provider results, the message tool and final Discord delivery suppress it, including queued payloads from older builds. Real prose, attachments and quoted/code examples remain intact. An unanswered human request gets one delivery-correction attempt; repeated silence becomes an explicit failure rather than a silently completed request. This does not certify that an earlier progress message fully answered the request.
-
-Returned answers are deduplicated against text already delivered in the same answer during the preceding two minutes. Whitespace-only differences in prose are ignored, while code formatting is preserved. Message length and proximity alone never suppress a distinct answer; semantic paraphrases remain deliverable because their equivalence is not established mechanically.
+The daemon refuses the request unless `CLAWSTRUM_SUPERVISED=1` is set. Regenerate an older unit to get it, or set it in another supervisor that restarts exit 75. The command installs no code, so install the new version first.

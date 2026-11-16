@@ -1,195 +1,185 @@
-# Configuration reference
+# Configuration
 
-Clawstrum reads `config.json` from its state directory, `CLAWSTRUM_HOME` (default `~/.clawstrum`). `clawstrum setup` or `clawstrum init` writes a first version; [templates/config.example.json](../templates/config.example.json) is a fuller example. The schema itself is in [src/config.ts](../src/config.ts), which is authoritative when this page and the code disagree.
+Clawstrum reads `config.json` from `CLAWSTRUM_HOME` (default `~/.clawstrum`). `clawstrum setup` or `clawstrum init` writes a first version, and [templates/config.example.json](../templates/config.example.json) is a fuller example. The schema in [src/config.ts](../src/config.ts) wins when this page disagrees.
 
-## Parsing and reload
+## Loading
 
-The file is JSON checked by strict schemas: an unknown field is an error, not ignored. Missing optional fields take the defaults below. Clawstrum validates a configuration before writing it, writes a temporary file and renames it over `config.json`.
+- Unknown fields are an error. Missing optional fields take the defaults below.
+- Clawstrum validates a configuration before writing it and replaces the file atomically.
+- `~` expands to your home. Relative account homes, executables and voice paths resolve against `CLAWSTRUM_HOME`.
+- Account IDs are unique, and two accounts of one provider can't share a home.
+- Most changes need a restart. The daemon applies `discord.channelIds` and `accounts` within a few seconds (see [subscriptions](subscriptions.md#account-registry)). An invalid file is reported once and the running configuration stays.
+- A running turn keeps the configuration it started with. `AGENTS.md` and skills are read again on each attempt.
 
-`~` and `~/...` expand to your home directory. Relative account homes, executable paths and voice paths resolve against the state directory. Account IDs must be unique, and two accounts of the same provider cannot share a home.
+## Top level
 
-The daemon reads the configuration at startup. Most changes need a restart. The exception is `discord.channelIds`: the running daemon checks the file every few seconds and applies a changed channel list without a restart. An invalid file is reported once and the running configuration stays in place. Each run stores the validated configuration it started with, and the agent's tool server uses that copy, so an edit in progress cannot change a running turn. `AGENTS.md` and skill files are read again on each attempt, and switching among configured accounts needs no restart.
-
-## Root fields
-
-| Field        | Type and default             | Meaning                                                                                                                                                             |
-| ------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `version`    | `1`, required                | Configuration format version                                                                                                                                        |
-| `name`       | Nonempty string; `Clawstrum` | The agent's name. Shown in the ready log and dashboard; in a channel shared with another bot, a message that contains this name as a word counts as addressed to it |
-| `discord`    | Object, required             | Discord routing; see below                                                                                                                                          |
-| `review`     | Object; defaults filled      | Nightly self-review channel; see below                                                                                                                              |
-| `accounts`   | Nonempty array, required     | Provider profiles; see below                                                                                                                                        |
-| `runtime`    | Object; defaults filled      | Timing, limits and background maintenance; see below                                                                                                                |
-| `research`   | Object; defaults filled      | Research tools, validation, subagents and Slurm; see the [research configuration reference](research.md#configuration-reference)                                    |
-| `groups`     | Object; defaults filled      | Channel groups and their reviewer; see [channel groups](groups.md)                                                                                                  |
-| `decisions`  | Object; defaults filled      | Optional typed decision service, Jev or OpenRouter; see [Jev](jev.md#configuration)                                                                                 |
-| `mcpServers` | Object by server name; `{}`  | Extra stdio MCP servers for the lead agent, each `{command, args=[], env={}}`. Names match `[A-Za-z0-9_-]+`; `clawstrum` is reserved                                |
-| `voice`      | Object; off                  | Speech-to-text for audio attachments; see below                                                                                                                     |
-| `workAlone`  | Object; off                  | Unattended work under a stated ask; see below                                                                                                                       |
-| `sandbox`    | Object; off                  | Sandbox for subagent shell commands; see below                                                                                                                      |
+- `version` is `1` and required.
+- `name` is the agent name, `Clawstrum` by default. It shows in logs and the dashboard. In a channel with another bot, a message naming it counts as addressed to it.
+- `discord` and `accounts` are required. Both are below, with `review`, `runtime`, `voice`, `workAlone` and `sandbox`.
+- `research` is in [research configuration](research.md#configuration-reference), `groups` in [channel groups](groups.md), and `decisions` (Jev or OpenRouter) in [Jev](jev.md#configuration).
+- `mcpServers` adds stdio MCP servers for the lead agent by name, each `{command, args=[], env={}}`, default `{}`. Names match `[A-Za-z0-9_-]+`, and `clawstrum` is reserved.
 
 ## Discord
 
-| Field                               | Type and default                    | Meaning                                                                                                                                                                                           |
-| ----------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `discord.tokenEnv`                  | String; `DISCORD_BOT_TOKEN`         | Name of the environment variable that holds the bot token                                                                                                                                         |
-| `discord.ownerIds`                  | Nonempty array of IDs               | Discord user IDs of the owners. An ID is 5 to 25 digits                                                                                                                                           |
-| `discord.guildId`                   | Optional ID                         | Restrict server input to this server and register the slash command there                                                                                                                         |
-| `discord.applicationId`             | Optional ID                         | The Discord Application ID, saved by `clawstrum setup` so it can print the invite link again. Not used by the running agent                                                                       |
-| `discord.channelIds`                | ID array; `[]`                      | Channels the agent answers in; threads under them are accepted too. Empty means no server channel. Reloaded while the daemon runs                                                                 |
-| `discord.noticeChannelId`           | Optional ID                         | Operator channel for quota warnings, account and model switch notices, group-review issues and `doctor --notify`                                                                                  |
-| `discord.plainDashes`               | Boolean; `true`                     | Replace em and en dashes in outgoing prose with plain hyphens. Code, quoted strings, paths and URLs are left alone                                                                                |
-| `discord.sendAdviceChars`           | Integer ≥0; `0`                     | When above 0, a message sent through the send tool that is longer than this many characters is still sent, and the tool result advises the agent to keep the next one shorter. `0` turns this off |
-| `discord.allowDMs`                  | Boolean; `true`                     | Accept direct messages from allowed senders (owners by default)                                                                                                                                   |
-| `discord.newConversationLookbackMs` | Integer ≥0; `86400000`              | When a channel is first registered, how far back to read messages it already has                                                                                                                  |
-| `discord.allowAllSenders`           | Boolean; `false`                    | Accept input from people who are not owners, within the configured channels and DMs. Controls stay owner-only                                                                                     |
-| `discord.respondToBots`             | Boolean; `false`                    | Accept input from other bots that pass the sender and channel rules. The agent's own messages are always ignored                                                                                  |
-| `discord.mentionOnlyWithBots`       | Boolean; `true`                     | In a channel another bot also answers in, keep messages that do not address this agent as context instead of answering them                                                                       |
-| `discord.dashboard.enabled`         | Boolean; `false`                    | Keep a Discord forum that shows the agent's configuration, instructions, skills and tools                                                                                                         |
-| `discord.dashboard.channelName`     | String, 1 to 100 chars; `dashboard` | Forum name to find or create                                                                                                                                                                      |
-| `discord.dashboard.channelId`       | Optional ID                         | Use this forum as-is instead of finding or creating one. Must not also be in `discord.channelIds`                                                                                                 |
-| `discord.dashboard.categoryId`      | Optional ID                         | Category for a created forum                                                                                                                                                                      |
-| `discord.dashboard.syncIntervalMs`  | 60000 to 86400000; `600000`         | Interval between full dashboard syncs                                                                                                                                                             |
-| `discord.dashboard.watchIntervalMs` | 10000 to 86400000; `60000`          | Interval for checking whether the files the dashboard shows have changed                                                                                                                          |
-| `discord.dashboard.viewerIds`       | Optional ID array                   | Who can see the forum; unset means every owner                                                                                                                                                    |
+An ID is 5 to 25 digits.
+
+| Field                               | Default             | Meaning                                                                                           |
+| ----------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------- |
+| `discord.tokenEnv`                  | `DISCORD_BOT_TOKEN` | Variable that holds the bot token                                                                 |
+| `discord.ownerIds`                  | required, nonempty  | Owners' user IDs                                                                                  |
+| `discord.guildId`                   | unset               | Accept server input only from this server, and register the slash command there                   |
+| `discord.applicationId`             | unset               | Saved by setup to print the invite link again. Unused at run time                                 |
+| `discord.channelIds`                | `[]`                | Channels the agent answers in, with their threads. Empty means no server channel                  |
+| `discord.noticeChannelId`           | unset               | Channel for quota warnings, account and model switches, group-review issues and `doctor --notify` |
+| `discord.plainDashes`               | `true`              | Replace em and en dashes in outgoing prose with hyphens. Code, quotes, paths and URLs stay        |
+| `discord.sendAdviceChars`           | `0`                 | Above 0, a sent message longer than this still goes out and the agent is asked to be shorter      |
+| `discord.allowDMs`                  | `true`              | Accept DMs from allowed senders                                                                   |
+| `discord.newConversationLookbackMs` | `86400000`          | How far back a newly registered channel reads                                                     |
+| `discord.allowAllSenders`           | `false`             | Accept input from non-owners. Controls stay owner-only                                            |
+| `discord.respondToBots`             | `false`             | Accept other bots that pass the sender and channel rules                                          |
+| `discord.mentionOnlyWithBots`       | `true`              | Where another bot also answers, keep messages not addressed to this agent as context only         |
+| `discord.dashboard.enabled`         | `false`             | Keep a forum showing configuration, instructions, skills and tools                                |
+| `discord.dashboard.channelName`     | `dashboard`         | Forum name to find or create, 1 to 100 characters                                                 |
+| `discord.dashboard.channelId`       | unset               | Use this forum as is. Must not be in `discord.channelIds`                                         |
+| `discord.dashboard.categoryId`      | unset               | Category for a created forum                                                                      |
+| `discord.dashboard.syncIntervalMs`  | `600000`            | Full sync interval, 60000 to 86400000                                                             |
+| `discord.dashboard.watchIntervalMs` | `60000`             | Changed-file check interval, 10000 to 86400000                                                    |
+| `discord.dashboard.viewerIds`       | unset               | Who sees the forum. Unset means every owner                                                       |
 
 ## Self-review
 
-| Field              | Type and default           | Meaning                                                                          |
-| ------------------ | -------------------------- | -------------------------------------------------------------------------------- |
-| `review.channelId` | Optional ID                | Channel for the nightly self-review. Must also be listed in `discord.channelIds` |
-| `review.at`        | `HH:MM` (24-hour); `03:00` | Time of the nightly review, in `runtime.timezone` or the host's zone             |
+| Field              | Default | Meaning                                                                   |
+| ------------------ | ------- | ------------------------------------------------------------------------- |
+| `review.channelId` | unset   | Channel for the nightly self-review. Must also be in `discord.channelIds` |
+| `review.at`        | `03:00` | 24-hour time, in `runtime.timezone` or the host's zone                    |
 
-`clawstrum review schedule --channel ID` sets both and registers the task. See [self-review](workflows.md#optional-self-review).
+`clawstrum review schedule --channel ID` sets both and registers the task. See [self-review](customize.md#self-review).
 
 ## Accounts
 
-| Field                     | Type and default                          | Meaning                                                                                                                      |
-| ------------------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `id`                      | String, required                          | 1 to 80 letters, digits, underscores or hyphens; unique                                                                      |
-| `provider`                | `claude`, `codex` or `gemini`, required   | Which SDK runs this account                                                                                                  |
-| `home`                    | Path, required                            | Where the provider keeps its login, settings and sessions. Separate from your usual CLI login                                |
-| `priority`                | Integer −1000 to 1000; unset (0)          | Automatic routing tries higher priority first                                                                                |
-| `model`                   | Optional string                           | Passed to the SDK. Clawstrum does not check that the model exists for the subscription                                       |
-| `effort`                  | Optional                                  | `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Claude rejects `ultra`; what else works depends on the runtime and model |
-| `quotaBuckets`            | String array; `[]`                        | Quota limits that apply only to the primary `model`                                                                          |
-| `modelFallbacks`          | Array of `{model, quotaBuckets=[]}`; `[]` | Ordered fallback models on the same login and concurrency cap. Needs an explicit `model`; all model names must differ        |
-| `tokenEnv`                | Optional environment variable name        | Claude only: environment variable holding an OAuth token for this account. Codex accounts use their own login home instead   |
-| `executable`              | Optional path                             | Use this provider executable instead of the bundled one. It must support `--version`                                         |
-| `maxConcurrent`           | Integer 1 to 64; `4`                      | Concurrent runs on this account                                                                                              |
-| `owner`, `label`, `notes` | Optional text                             | Plain description for people; never a secret                                                                                 |
+| Field                     | Default          | Meaning                                                                                                 |
+| ------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `id`                      | required         | Up to 80 characters from `A-Z a-z 0-9 _ -`                                                              |
+| `provider`                | required         | `claude`, `codex` or `gemini`                                                                           |
+| `home`                    | required         | Where the provider keeps login, settings and sessions. Separate from your usual CLI login               |
+| `priority`                | `0`              | −1000 to 1000. Automatic routing tries higher first                                                     |
+| `model`                   | provider default | Passed to the SDK unchecked                                                                             |
+| `effort`                  | provider default | `low`, `medium`, `high`, `xhigh`, `max` or `ultra`. Claude rejects `ultra`                              |
+| `quotaBuckets`            | `[]`             | Quota limits that apply only to the primary `model`                                                     |
+| `modelFallbacks`          | `[]`             | Ordered `{model, quotaBuckets=[]}` on the same login and concurrency cap. Needs `model`. No model twice |
+| `tokenEnv`                | unset            | Claude only: variable holding an OAuth token for this account                                           |
+| `executable`              | bundled          | Provider executable to use. Must support `--version`                                                    |
+| `maxConcurrent`           | `4`              | Concurrent runs, 1 to 64                                                                                |
+| `owner`, `label`, `notes` | unset            | Description for people. Never a secret                                                                  |
 
-Leaving out `model` or `effort` uses the provider's default. The shared buckets `five_hour`, `seven_day`, `5h`, `7d` and `unknown` cannot be scoped to a model. See [model fallback and quota notices](setup.md#model-fallback-and-quota-notices) for an example and [subscriptions](subscriptions.md) for how routing uses these fields.
-
-Quota warnings go to `discord.noticeChannelId` when it is set, even if that channel has never had a conversation; otherwise they go to the conversation that observed them. Above `runtime.quotaWarningThreshold` routing prefers other routes, but still uses a strained one when nothing else is available. An observation without a reset time expires after `runtime.unknownQuotaCooldownMs`. Hard quota cooldowns are tracked separately.
+The buckets `five_hour`, `seven_day`, `5h`, `7d` and `unknown` can't be scoped to a model. See [subscriptions](subscriptions.md) for routing, fallback and quota warnings.
 
 ## Runtime
 
 All fields are under `runtime`.
 
-| Field                                | Default              | Meaning                                                                                                                                                                                      |
-| ------------------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxConcurrent`                      | `4`                  | Conversations running at once, 1 to 64                                                                                                                                                       |
-| `debounceMs` / `debounceMaxMs`       | `1500` / `15000`     | Quiet interval that ends a burst of user messages, and the longest wait; `debounceMaxMs` must be at least `debounceMs`                                                                       |
-| `typingMaxMs`                        | `300000`             | Longest wait while Discord shows the person still typing past `debounceMaxMs`; must be at least `debounceMaxMs`                                                                              |
-| `startupTimeoutMs`                   | `120000`             | Deadline for the provider's first session or ready event, at least 100                                                                                                                       |
-| `silenceTimeoutMs` / `turnTimeoutMs` | `600000` / `7200000` | Silence and total turn deadlines; 0 turns either off. Silence is not counted while a tool call runs or the turn holds a live background task; `turnTimeoutMs` is the only bound on that wait |
-| `queuedInputTimeoutMs`               | `120000`             | A user message that cannot enter a busy turn for this long, while the turn is also idle this long, ends the turn and continues in a new one; 0 turns this off                                |
-| `scheduledMaxTurns`                  | `0`                  | Turn budget for scheduled runs, 0 to 1000; 0 is no limit. Claude uses its native turn cap; Codex counts completed tool items and can overshoot by one                                        |
-| `shellCpuSeconds`                    | `0`                  | Soft CPU-seconds per process for Claude agent shell commands, for shared hosts such as cluster login nodes; 0 is off. `sbatch`, `srun` and `salloc` lift it. Codex is not covered            |
-| `timezone`                           | host zone            | IANA time zone for the agent's current-time line, time stamps on input and in tool results, the self-review schedule and usage reports                                                       |
-| `abortGraceMs`                       | `3000`               | Grace period for a cooperative abort, 100 to 10000                                                                                                                                           |
-| `inputReleaseGraceMs`                | `10000`              | How long a Claude input stream stays open after background work settles, 0 to 60000                                                                                                          |
-| `promptChars`                        | `100000`             | Total characters of context the host adds to a prompt, 8000 to 1000000                                                                                                                       |
-| `historyChars`                       | `32000`              | Characters of recent portable history, 2000 to 200000                                                                                                                                        |
-| `unknownQuotaCooldownMs`             | `900000`             | Cooldown for a quota observation with no reset time, at least 1000                                                                                                                           |
-| `proactiveThreshold`                 | `0.95`               | Usage fraction, 0 to 1, at which a route with a known reset is no longer admitted                                                                                                            |
-| `quotaWarningThreshold`              | `0.9`                | Usage fraction, 0 to 1, for an early warning and for preferring other routes; 1 turns preference off                                                                                         |
-| `maxAttempts`                        | `3`                  | Fast retries for a transient failure, 1 to 10                                                                                                                                                |
-| `slowRetryMs`                        | `300000`             | Interval for slow retries after the fast ones, 0 or at least 60000; 0 makes the fast limit final                                                                                             |
-| `blockedVersions`                    | `[]`                 | Provider CLI versions to refuse, each `{provider, version, reason}`                                                                                                                          |
-| `attachmentMaxBytes`                 | `26214400`           | Size limit per incoming or outgoing file, at least 1                                                                                                                                         |
-| `maintenance`                        | see below            | Budget for background model calls                                                                                                                                                            |
-| `consolidation`                      | see below            | Conversation consolidation before a planned session rotation                                                                                                                                 |
-| `memoryReview`                       | see below            | Regular memory consistency review                                                                                                                                                            |
+| Field                                | Default              | Meaning                                                                                                                     |
+| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `maxConcurrent`                      | `4`                  | Conversations at once, 1 to 64                                                                                              |
+| `debounceMs` / `debounceMaxMs`       | `1500` / `15000`     | Quiet time that ends a burst of messages, and the longest wait. Max ≥ `debounceMs`                                          |
+| `typingMaxMs`                        | `300000`             | Longest wait while you're shown typing. At least `debounceMaxMs`                                                            |
+| `startupTimeoutMs`                   | `120000`             | Deadline for the provider's first event, at least 100                                                                       |
+| `silenceTimeoutMs` / `turnTimeoutMs` | `600000` / `7200000` | Silence and total turn limits. 0 is off. Silence isn't counted while a tool or live background task runs                    |
+| `queuedInputTimeoutMs`               | `120000`             | A message that can't enter a busy turn idle this long ends it and starts a new one. 0 is off                                |
+| `scheduledMaxTurns`                  | `0`                  | Turn budget for scheduled runs, 0 (no limit) to 1000. Codex can go one over                                                 |
+| `shellCpuSeconds`                    | `0`                  | Soft CPU seconds per process for Claude agent shell commands. 0 is off. `sbatch`, `srun` and `salloc` lift it. Not on Codex |
+| `timezone`                           | host zone            | IANA zone for the agent's clock, time stamps, self-review and usage reports                                                 |
+| `abortGraceMs`                       | `3000`               | Grace for a cooperative abort, 100 to 10000                                                                                 |
+| `inputReleaseGraceMs`                | `10000`              | How long a Claude input stream stays open after background work settles, 0 to 60000                                         |
+| `promptChars`                        | `100000`             | Context characters the host adds to a prompt, 8000 to 1000000                                                               |
+| `historyChars`                       | `32000`              | Characters of recent portable history, 2000 to 200000                                                                       |
+| `unknownQuotaCooldownMs`             | `900000`             | Lifetime of a quota observation with no reset time, at least 1000                                                           |
+| `proactiveThreshold`                 | `0.95`               | Usage, 0 to 1, at which a route with a known reset stops being used                                                         |
+| `quotaWarningThreshold`              | `0.9`                | Usage, 0 to 1, for a warning and preferring other routes. 1 turns preference off                                            |
+| `maxAttempts`                        | `3`                  | Fast retries for a transient failure, 1 to 10                                                                               |
+| `slowRetryMs`                        | `300000`             | Slow retry interval after that, 0 or at least 60000. 0 makes the fast limit final                                           |
+| `blockedVersions`                    | `[]`                 | Provider CLI versions to refuse, each `{provider, version, reason}`                                                         |
+| `attachmentMaxBytes`                 | `26214400`           | Size limit per file in or out                                                                                               |
 
-`nativeSessionMaxTurns`, `nativeSessionMaxBytes` and `nativeSessionMaxAgeMs` (default `0`) are still accepted so old files load, but have no effect. Remove them when you edit the file.
+Clawstrum checks the provider's `--version` before each run. `clawstrum doctor` reports blocked versions and `clawstrum smoke` honors them. An unlisted version isn't known to work.
 
-Before each run, a worker asks the provider executable for its version with `--version`, records it, and refuses to run a version listed in `blockedVersions`. `clawstrum doctor` reports blocked versions and `clawstrum smoke` honors them. A version that is not listed is not thereby known to work.
+`nativeSessionMaxTurns`, `nativeSessionMaxBytes` and `nativeSessionMaxAgeMs` still load but do nothing. Remove them.
 
-### Background maintenance
+### Background passes
 
-| Field                                | Default              | Meaning                                                                                                                                           |
-| ------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maintenance.maxCallsPerDay`         | `24`                 | Background model calls per rolling 24 hours, 0 to 10000; 0 pauses them                                                                            |
-| `maintenance.minIntervalMs`          | `1800000`            | Minimum time between background call starts, 0 to 86400000                                                                                        |
-| `maintenance.maxConcurrent`          | `1`                  | Background calls at once, 1 to 16                                                                                                                 |
-| `maintenance.requestedReserve`       | `6`                  | Calls of `maxCallsPerDay` kept for passes requested after a compaction, at most a quarter of it                                                   |
-| `maintenance.scanIntervalMs`         | `60000`              | How often sessions are checked for a due rotation or review, 1000 to 3600000                                                                      |
-| `consolidation.enabled`              | `true`               | Consolidate a conversation before rotating its native session                                                                                     |
-| `consolidation.models`               | `{claude: "sonnet"}` | Model per provider (`claude`, `codex`, `gemini`); a provider without one uses the account's model                                                 |
-| `consolidation.effort`               | `low`                | `low`, `medium`, `high`, `xhigh` or `max`                                                                                                         |
-| `consolidation.thresholdBytes`       | `0`                  | Off; the daily pass replaces it. A positive value: raw history not yet consolidated, in bytes, that triggers consolidation and a planned rotation |
-| `consolidation.daily.enabled`        | `true`               | One pass per channel per local day when it has new history and is idle; no rotation                                                               |
-| `consolidation.daily.hour`           | `4`                  | Local hour, 0 to 23, at or after which the daily pass may run                                                                                     |
-| `consolidation.daily.timezone`       | unset                | IANA zone for the daily pass; unset uses `runtime.timezone`, else the host's zone                                                                 |
-| `consolidation.daily.maxCallsPerDay` | `120`                | Daily-pass calls per 24 hours, separate from `maintenance.maxCallsPerDay`                                                                         |
-| `consolidation.daily.tailChunks`     | `8`                  | Newest history chunks a daily pass reads; an older backlog stays in raw history                                                                   |
-| `consolidation.requestedTailChunks`  | `2`                  | Newest history chunks a pass requested after a compaction reads, 1 to 100                                                                         |
-| `consolidation.chunkChars`           | `120000`             | Characters per chunk, 2000 to 400000                                                                                                              |
-| `consolidation.maxChunksPerPass`     | `8`                  | Chunks per pass, 1 to 1000                                                                                                                        |
-| `consolidation.timeoutMs`            | `600000`             | Time limit per pass, 1000 to 3600000                                                                                                              |
-| `memoryReview.enabled`               | `true`               | Run consistency reviews                                                                                                                           |
-| `memoryReview.models`                | `{claude: "sonnet"}` | Review model per provider; a provider without one uses the account's model                                                                        |
-| `memoryReview.effort`                | `low`                | `low`, `medium`, `high`, `xhigh` or `max`                                                                                                         |
-| `memoryReview.debounceMs`            | `30000`              | Quiet time after new activity before a review                                                                                                     |
-| `memoryReview.minIntervalMs`         | `300000`             | Minimum time between reviews of one scope                                                                                                         |
-| `memoryReview.intervalMs`            | `0`                  | Off: the daily pass covers quiet channels. A positive value (at least 60000) reviews a scope after that age                                       |
-| `memoryReview.chunkChars`            | `80000`              | Characters per chunk, 2000 to 400000                                                                                                              |
-| `memoryReview.maxChunksPerPass`      | `4`                  | Chunks per pass, 1 to 1000                                                                                                                        |
-| `memoryReview.timeoutMs`             | `300000`             | Time limit per pass, 1000 to 3600000                                                                                                              |
+See [memory](memory-lifecycle.md) for what these do. Models are per provider (`claude`, `codex`, `gemini`). A provider without one uses the account's model. Effort is `low`, `medium`, `high`, `xhigh` or `max`.
 
-An older file that sets `research.consolidator.enabled`, `models` or `effort` still works: those values carry over to `runtime.consolidation` unless it sets them itself. See [memory lifecycle](memory-lifecycle.md) for what these passes do.
+| Field                                | Default              | Meaning                                                                          |
+| ------------------------------------ | -------------------- | -------------------------------------------------------------------------------- |
+| `maintenance.maxCallsPerDay`         | `24`                 | Calls per rolling 24 hours, 0 to 10000. 0 pauses them                            |
+| `maintenance.minIntervalMs`          | `1800000`            | Time between call starts, 0 to 86400000                                          |
+| `maintenance.maxConcurrent`          | `1`                  | Calls at once, 1 to 16                                                           |
+| `maintenance.requestedReserve`       | `6`                  | Calls kept for passes after a compaction, at most a quarter of the total         |
+| `maintenance.scanIntervalMs`         | `60000`              | How often due passes are checked, 1000 to 3600000                                |
+| `consolidation.enabled`              | `true`               | Run consolidation, including the daily pass                                      |
+| `consolidation.models`               | `{claude: "sonnet"}` | Model per provider                                                               |
+| `consolidation.effort`               | `low`                | Effort                                                                           |
+| `consolidation.thresholdBytes`       | `0`                  | Off. A positive value consolidates with a fresh session at that much new history |
+| `consolidation.daily.enabled`        | `true`               | One pass per channel per local day, when it has new history and is idle          |
+| `consolidation.daily.hour`           | `4`                  | Local hour, 0 to 23, from which it may run                                       |
+| `consolidation.daily.timezone`       | unset                | Zone. Unset uses `runtime.timezone`, else the host's                             |
+| `consolidation.daily.maxCallsPerDay` | `120`                | Calls per 24 hours, separate from `maintenance`                                  |
+| `consolidation.daily.tailChunks`     | `8`                  | Newest chunks it reads                                                           |
+| `consolidation.requestedTailChunks`  | `2`                  | Newest chunks a pass after a compaction reads, 1 to 100                          |
+| `consolidation.chunkChars`           | `120000`             | Characters per chunk, 2000 to 400000                                             |
+| `consolidation.maxChunksPerPass`     | `8`                  | Chunks per pass, 1 to 1000                                                       |
+| `consolidation.timeoutMs`            | `600000`             | Time limit per pass, 1000 to 3600000                                             |
+| `memoryReview.enabled`               | `true`               | Run memory reviews                                                               |
+| `memoryReview.models`                | `{claude: "sonnet"}` | Model per provider                                                               |
+| `memoryReview.effort`                | `low`                | Effort                                                                           |
+| `memoryReview.debounceMs`            | `30000`              | Quiet time after activity before a review                                        |
+| `memoryReview.minIntervalMs`         | `300000`             | Time between reviews of one scope                                                |
+| `memoryReview.intervalMs`            | `0`                  | Off. A positive value (at least 60000) reviews a scope after that age            |
+| `memoryReview.chunkChars`            | `80000`              | Characters per chunk, 2000 to 400000                                             |
+| `memoryReview.maxChunksPerPass`      | `4`                  | Chunks per pass, 1 to 1000                                                       |
+| `memoryReview.timeoutMs`             | `300000`             | Time limit per pass, 1000 to 3600000                                             |
+
+Old `research.consolidator.enabled`, `models` and `effort` values still apply unless `runtime.consolidation` sets them.
 
 ## Voice notes
 
-| Field           | Default   | Meaning                                                              |
-| --------------- | --------- | -------------------------------------------------------------------- |
-| `voice.enabled` | `false`   | Turn audio attachments into text on this host before the turn        |
-| `voice.python`  | `python3` | Python interpreter; a value containing `/` is a path                 |
-| `voice.asrDir`  | `asr`     | Directory with the speech model                                      |
-| `voice.script`  | unset     | Transcription script; unset uses the bundled `scripts/transcribe.py` |
+| Field           | Default   | Meaning                                                   |
+| --------------- | --------- | --------------------------------------------------------- |
+| `voice.enabled` | `false`   | Transcribe audio attachments on this host before the turn |
+| `voice.python`  | `python3` | Python interpreter. A value with `/` is a path            |
+| `voice.asrDir`  | `asr`     | Directory with the speech model                           |
+| `voice.script`  | unset     | Transcription script. Unset uses `scripts/transcribe.py`  |
 
 `scripts/install-voice.sh` installs the model. See [voice notes](customize.md#voice-notes).
 
 ## Working alone
 
-| Field                           | Default      | Meaning                                                                                             |
-| ------------------------------- | ------------ | --------------------------------------------------------------------------------------------------- |
-| `workAlone.enabled`             | `false`      | Give the agent the `work_alone` and `continue_work` tools and wake it after quiet stretches         |
-| `workAlone.quietMinutes`        | `60`         | Minutes with no turn running before a conversation that works alone is woken                        |
-| `workAlone.staleHours`          | `24`         | Hours without progress after which working alone switches off                                       |
-| `workAlone.morning.enabled`     | `false`      | Send a morning where-we-are message in each recently active conversation; needs `workAlone.enabled` |
-| `workAlone.morning.cron`        | `40 3 * * *` | When the morning message runs                                                                       |
-| `workAlone.morning.timezone`    | unset        | Time zone for `cron`; unset uses `runtime.timezone`, then the host's zone                           |
-| `workAlone.morning.activeHours` | `24`         | Conversations with user input within this many hours get the morning message                        |
+| Field                           | Default      | Meaning                                                                            |
+| ------------------------------- | ------------ | ---------------------------------------------------------------------------------- |
+| `workAlone.enabled`             | `false`      | Give the agent `work_alone` and `continue_work`, and wake it after quiet time      |
+| `workAlone.quietMinutes`        | `60`         | Minutes with no turn before a conversation working alone is woken                  |
+| `workAlone.staleHours`          | `24`         | Hours without progress before working alone stops                                  |
+| `workAlone.morning.enabled`     | `false`      | Morning status message in recently active conversations. Needs `workAlone.enabled` |
+| `workAlone.morning.cron`        | `40 3 * * *` | When it runs                                                                       |
+| `workAlone.morning.timezone`    | unset        | Zone for `cron`. Unset uses `runtime.timezone`, then the host's                    |
+| `workAlone.morning.activeHours` | `24`         | Conversations with your input within this many hours get it                        |
 
 See [working alone](customize.md#working-alone).
 
 ## Subagent sandbox
 
-| Field                  | Default | Meaning                                                                                                                                                          |
-| ---------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sandbox.workers`      | `false` | Run subagent shell commands in a sandbox: bubblewrap for Claude (`scripts/worker-sandbox.sh`), Codex's `workspace-write` mode for Codex. The lead is not covered |
-| `sandbox.writable`     | `[]`    | Extra writable paths for sandboxed subagents, absolute or starting with `~/`                                                                                     |
-| `sandbox.offlineRoles` | `[]`    | Subagent roles that get no network inside the sandbox                                                                                                            |
+| Field                  | Default | Meaning                                                                                                                       |
+| ---------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `sandbox.workers`      | `false` | Sandbox subagent shell commands: bubblewrap on Claude (`scripts/worker-sandbox.sh`), `workspace-write` on Codex. Not the lead |
+| `sandbox.writable`     | `[]`    | Extra writable paths, absolute or starting with `~/`                                                                          |
+| `sandbox.offlineRoles` | `[]`    | Subagent roles with no network in the sandbox                                                                                 |
 
 See [worker sandbox](customize.md#worker-sandbox).
 
 ## Environment and files
 
-The CLI picks the state directory from `CLAWSTRUM_HOME`, then reads `.env` in it. Each line must be a single `NAME=value` assignment; a value that spans lines or an unclosed quote is rejected with its line number, without printing the value. Variables already set in the environment take precedence. `.env` cannot move the state directory.
+The CLI reads `.env` in `CLAWSTRUM_HOME`. Each line is one `NAME=value`. A multi-line value or unclosed quote is rejected with its line number, without printing the value. Variables already set win. `.env` can't move the state directory.
 
-New directories Clawstrum creates are private (`0700`). The configuration, `.env`, instruction files, exports, snapshots and transferred files are written `0600`. `clawstrum doctor` reports a `.env` or configuration file that others can read. Storage is not encrypted, and the agent has full access to the host, so it can change these files too.
+New directories are `0700`. The configuration, `.env`, instruction files, exports, snapshots and transferred files are `0600`. `clawstrum doctor` reports a `.env` or configuration others can read. Storage isn't encrypted, and the agent has full host access.
 
-`clawstrum init` refuses to overwrite an existing `config.json`. It writes the configuration, creates `AGENTS.md` and `.env` when they are missing, and creates `skills/` with the bundled skills. It is not a repair tool.
+`clawstrum init` refuses to overwrite `config.json`. It creates `AGENTS.md`, `.env` and `skills/` if missing. It isn't a repair tool.
