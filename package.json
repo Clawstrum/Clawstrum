@@ -4,6 +4,7 @@
   "description": "Autonomous agents on your host, in your Discord, with portable conversations.",
   "type": "module",
   "license": "MIT",
+  "author": "Jorin Overwiening and Xu Pan",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/clawstrum/clawstrum.git"

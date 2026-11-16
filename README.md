@@ -82,6 +82,10 @@ In Discord, use `/clawstrum` or the text form.
 
 [Setup](docs/setup.md) · [Configuration](docs/configuration.md) · [CLI](docs/cli.md) · [Customizing](docs/customize.md) · [Live steering](docs/live-steering.md) · [Memory](docs/memory-lifecycle.md) · [Research tools](docs/research.md) · [Channel groups](docs/groups.md) · [Operations](docs/operations.md) · [Testing](docs/testing.md) · [All docs](docs/index.md)
 
+## Authors
+
+Jorin Overwiening and Xu Pan
+
 ## License
 
 Clawstrum's code is MIT licensed. Provider SDKs keep their own licenses and service terms. Clawstrum descends from NanoClaw, see [NOTICE](NOTICE).
