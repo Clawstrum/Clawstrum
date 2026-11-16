@@ -2,6 +2,10 @@
 
 Clawstrum is one Node.js service on one host. SQLite holds work and output, and Discord carries all communication. Claude Code (Agent SDK), Codex (App Server or SDK) and Gemini (Antigravity CLI over ACP) run in supervised child processes with full host access. The separate processes give lifecycle control. They are not a sandbox.
 
+<p align="center">
+  <img src="images/inside.png" width="560" alt="Clawstrum around Claude Code, Codex or Gemini. Your message is queued and recorded in a history archive, and a router adds a skill and older notes before it reaches the agent. A message sent during a run goes straight to the agent. The agent reads and edits memory, opens skills and searches the archive. Hooks check each tool call before it runs. Tools start subagents and set timers, and both wake the conversation later. Replies go back through the queue.">
+</p>
+
 ```mermaid
 flowchart LR
   User[Authorized Discord senders] --> Discord[Channels, threads, DMs]

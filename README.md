@@ -37,15 +37,13 @@ Open the `main` channel. The agent writes first and asks about your field, your 
 
 ## Features
 
-<p align="center">
-  <img src="docs/images/inside.png" width="640" alt="Inside one run: your message goes to a router that picks a skill, then to Claude Code, Codex or Gemini. The agent reads and edits its memory and skills. On Claude and Gemini runs, hooks check each tool call before it runs.">
-</p>
+[Architecture](docs/architecture.md) has a figure of every part a message passes through.
 
 - Each Discord channel has its own conversation, files and memory. By default only the owners you configure can give it work.
 - Before each run, a router picks the skill for the message. Skills are files that hold recurring procedures.
 - The agent you talk to runs on Clawstrum's own prompt instead of the coding agent's default, followed by your `AGENTS.md` instructions. Subagents keep the default. Gemini's prompt can't be replaced, so there Clawstrum's prompt is added to it.
 - Memory is plain `AGENTS.md` files, from one shared by all channels down to one per channel. Every message and tool result stays searchable. Once a day a background pass updates each channel's memory from the new conversation and cites the records behind each change. See [memory](docs/memory-lifecycle.md).
-- On Claude runs, hooks check each tool call before it runs. Side work goes to subagents with fixed roles, such as explorer, coder, checker and reviewer.
+- Hooks check each tool call before it runs. Side work goes to subagents with fixed roles, such as explorer, coder, checker and reviewer.
 - The agent can watch a file, a command or a Slurm job, or schedule a run. Clawstrum waits without calling the model and wakes the agent when something changes. An optional mode keeps it working toward a goal while you are away.
 - A message you send while the agent works joins the current run on Claude and Codex. On Gemini it ends the current turn and starts a new one with the same context. A message with a file attached always waits. See [live steering](docs/live-steering.md).
 - Research tools: literature search, paper retrieval with citation checks, Slurm jobs, and channel groups that share findings between related projects.
@@ -63,7 +61,7 @@ Every message the agent accepts runs with full access to the machine.
 
 - Run Clawstrum as its own user, on a server or cluster account set aside for it.
 - Text the agent reads, such as a web page or another bot's message, can carry instructions that it may follow.
-- On Claude and Gemini runs, a hook blocks common commands that print a secret file such as `.env` or the whole environment. It only catches known patterns, and it is off when `research.enabled` is false. Codex runs don't have it yet. See [secret files](docs/hooks-and-gates.md#secret-files).
+- A hook blocks common commands that print a secret file such as `.env` or the whole environment. It only catches known patterns, and it is off when `research.enabled` is false. See [secret files](docs/hooks-and-gates.md#secret-files).
 - `send_file` refuses Clawstrum's keys, logins, history and database, home dotfiles and secret files such as `.env`, on every provider. A copy under another name still goes out.
 
 ## Commands
