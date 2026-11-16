@@ -11,7 +11,9 @@ import {
   acpFailure,
   acpMcpServers,
   backgroundNote,
+  ensureGeminiHooks,
   geminiAcpProvider,
+  geminiHookCommand,
   geminiLoginProbe,
   nonSubscriptionAuth,
   permissionOutcome,
@@ -834,4 +836,106 @@ test('no follow-up prompt without holdBackgroundTasks, with research disabled, o
     await geminiAcpProvider.run(s.request('background', extra));
     assert.equal(s.received('session/prompt').length, 1, label);
   }
+});
+
+test('geminiHookCommand quotes node and the client path for the shell', () => {
+  const command = geminiHookCommand("/opt/it's here");
+  assert.equal(
+    command,
+    `'${process.execPath}' '/opt/it'\\''s here/dist/hook-client.js' --format gemini`,
+  );
+});
+
+test('ensureGeminiHooks writes the clawstrum group, keeps other groups and rewrites only on change', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gemini-hooks-test-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const account = { home: dir };
+  const configDir = path.join(dir, '.gemini', 'config');
+  const file = path.join(configDir, 'hooks.json');
+  ensureGeminiHooks(account, "'node' 'client.js' --format gemini");
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const group = [
+    {
+      matcher: '*',
+      hooks: [{ type: 'command', command: "'node' 'client.js' --format gemini", timeout: 60 }],
+    },
+  ];
+  assert.deepEqual(written, { clawstrum: { PreToolUse: group, PostToolUse: group } });
+
+  const mine = { PreToolUse: [{ matcher: 'run_command', hooks: [] }] };
+  fs.writeFileSync(file, JSON.stringify({ mine, clawstrum: written.clawstrum }));
+  const old = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+  fs.utimesSync(file, old, old);
+  ensureGeminiHooks(account, "'node' 'client.js' --format gemini");
+  assert.equal(Math.round(fs.statSync(file).mtimeMs), old.getTime());
+
+  ensureGeminiHooks(account, "'node' 'other.js' --format gemini");
+  const changed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(changed.mine, mine);
+  assert.equal(
+    changed.clawstrum.PreToolUse[0].hooks[0].command,
+    "'node' 'other.js' --format gemini",
+  );
+
+  fs.writeFileSync(file, '{not json');
+  ensureGeminiHooks(account, "'node' 'client.js' --format gemini");
+  assert.deepEqual(Object.keys(JSON.parse(fs.readFileSync(file, 'utf8'))), ['clawstrum']);
+  const kept = fs.readdirSync(configDir).filter((name) => name.startsWith('hooks.json.invalid-'));
+  assert.equal(kept.length, 1);
+  assert.equal(fs.readFileSync(path.join(configDir, kept[0]!), 'utf8'), '{not json');
+});
+
+function researchRequest(t: test.TestContext) {
+  const f = fixture(t);
+  return {
+    research: researchSchema.parse({ enabled: true }),
+    mcp: {
+      command: 'node',
+      args: ['mcp.js'],
+      env: { CLAWSTRUM_HOME: f.home, CLAWSTRUM_SESSION: f.session.id },
+    },
+  };
+}
+
+test('a run with research hooks writes agy hook file and passes the relay socket to agy', async (t) => {
+  const s = setup(t);
+  await geminiAcpProvider.run(s.request('text', researchRequest(t)), "'true'");
+  const hooks = JSON.parse(
+    fs.readFileSync(path.join(s.home, '.gemini', 'config', 'hooks.json'), 'utf8'),
+  );
+  assert.equal(hooks.clawstrum.PreToolUse[0].hooks[0].command, "'true'");
+  const socket = s.entries()[0].env.hookSocket;
+  assert.match(socket, /hook\.sock$/);
+  // The socket lives in the run's temp folder and goes with it.
+  assert.ok(!fs.existsSync(socket));
+});
+
+test('a text-only run writes no hook file and starts no relay', async (t) => {
+  const s = setup(t);
+  await geminiAcpProvider.run(
+    s.request('text', { ...researchRequest(t), toolless: true }),
+    "'true'",
+  );
+  assert.ok(!fs.existsSync(path.join(s.home, '.gemini', 'config', 'hooks.json')));
+  assert.equal(s.entries()[0].env.hookSocket, null);
+});
+
+test('agy running the hook command reaches the research checks, which refuse cat .env', async (t) => {
+  const s = setup(t);
+  const command = [
+    process.execPath,
+    '--import',
+    import.meta.resolve('tsx'),
+    path.resolve('src/hook-client.ts'),
+  ]
+    .map((part) => `'${part}'`)
+    .join(' ');
+  const final = await geminiAcpProvider.run(
+    s.request('hook', researchRequest(t)),
+    `${command} --format gemini`,
+  );
+  const out = JSON.parse(final);
+  assert.equal(out.decision, 'deny');
+  assert.ok(out.reason.length > 0);
 });

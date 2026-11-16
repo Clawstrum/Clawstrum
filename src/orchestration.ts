@@ -14,7 +14,7 @@ export function harnessSetup(account: Account, research?: ResearchConfig, worker
       : managed
         ? 'Subagent interface: research_delegate(key, role, brief, provider?, model?, effort?, ...). Role models are defaults, not an allowed-model list. An explicit model needs its provider and is applied before subscription account/quota selection. Unavailable capacity leaves that route queued; provider authentication/model errors are reported by that route. Model support is established by the provider response.'
         : 'Managed subagent tools are unavailable in this request’s research configuration.',
-    `Native provider delegation: ${!nativeDisabled ? 'not disabled by Clawstrum orchestration' : account.provider === 'gemini' ? 'off by Clawstrum policy but not blocked on Antigravity CLI, so do not use its own subagent, team, swarm or browser-agent tools' : 'disabled by Clawstrum orchestration'}. The managed subagent scheduler has only Claude/Codex/Gemini subscription adapters; it has no Bedrock or standalone shell-login fallback.`,
+    `Native provider delegation: ${nativeDisabled ? 'disabled by Clawstrum orchestration' : 'not disabled by Clawstrum orchestration'}. The managed subagent scheduler has only Claude/Codex/Gemini subscription adapters; it has no Bedrock or standalone shell-login fallback.`,
   ].join('\n');
 }
 

@@ -120,8 +120,8 @@ Clawstrum runs Google's Antigravity CLI (`agy acp`, the successor of Gemini CLI 
 
 - Run `clawstrum account add ID gemini`, then `clawstrum account login ID`. Open the Google link it prints in any browser and paste the code or full URL back. `account login` and `doctor` check the sign-in without a model call. Your own `$HOME` is untouched.
 - Only the Google sign-in (`oauth-personal`) is used. Clawstrum removes `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_CLOUD_*`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_GENAI_USE_*` and `AGY_LLM_GATEWAY_*`, refuses `tokenEnv`, and stops a run whose settings or log show an API key, cloud, enterprise or gateway mode.
-- The model is `gemini-4-argon` unless the account sets `model`. If agy doesn't offer it, the run fails and lists what it offers. `effort` is ignored.
+- The model is `gemini-4-argon` unless the account sets `model`. If agy doesn't offer it, the run fails and lists what it offers. `effort` sets agy's thinking level: `low` and `medium` as named, anything higher as `high`.
 - Sessions run in `auto` mode (`accept-edits` if agy has no `auto`) without approval prompts. Text-only calls use the read-only `plan` mode.
 - If agy no longer has a session, a fresh one starts with recent history carried over.
 - Clawstrum's instructions open each new session's first prompt.
-- Gemini runs have no messages joining a running turn, per-token cost estimates or quota windows, and `memory migrate` can't import their native sessions.
+- Gemini runs have no per-token cost estimates or quota windows, and `memory migrate` can't import their native sessions.

@@ -63,7 +63,7 @@ With [Jev](jev.md) on, the skill it picks goes into the prompt for that turn, so
 
 - Claude lead runs get `systemPrompt` as one string, the base prompt then `instructions`, after one fixed SDK line. Subagents and background passes get the `claude_code` preset with `instructions` appended. Claude resumes with `--system-prompt-snapshot off`.
 - Codex App Server gets `instructions` as developer instructions and the prompt as user text. A lead thread also gets `baseInstructions`, the base prompt plus [templates/base-prompt-codex.md](../templates/base-prompt-codex.md), in place of Codex's built-in prompt. That file holds tool lines copied from Codex's prompt for the pinned version. Re-copy them when the pin changes. Lead runs always use App Server. The SDK fallback keeps Codex's prompt.
-- Gemini gets the base prompt and `instructions` at the start of a new session's first prompt, after Google's own prompt. See [gemini-acp.ts](../src/gemini-acp.ts).
+- Gemini gets the base prompt and `instructions` added to Google's own system prompt when a session starts. An Antigravity CLI version without that option gets them at the start of the session's first prompt. See [gemini-acp.ts](../src/gemini-acp.ts).
 
 ## Live refresh and compaction
 

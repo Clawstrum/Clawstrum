@@ -266,8 +266,8 @@ export const researchSchema = z
     /** The daemon, every lead and subagent `claude` process, and every Bash tool command share one
      * CPU on the login node. A Bash command is prefixed with `renice -n <toolNice> -p $$` so the
      * daemon and the agent processes keep priority while the shell command runs; the daemon and the
-     * agent processes themselves stay at nice 0. 0 disables the prefix. Codex has no PreToolUse hook,
-     * so this has no effect on Codex leads or workers. */
+     * agent processes themselves stay at nice 0. 0 disables the prefix. It needs a PreToolUse hook
+     * that can change the call, which only Claude has, so it has no effect on Codex or Gemini. */
     toolNice: z.number().int().min(0).max(19).default(15),
     /** `workers.critic` is the deprecated name of `workers.review`, kept so older configuration
      * files still parse under .strict(); `review` wins when both are present. */
@@ -367,7 +367,7 @@ export const researchSchema = z
                 hold: z.enum(['off', 'once']).default('off'),
                 /** A git push whose paper change touches a claim, number, caption, figure or the abstract needs a checker or reviewer result
                  * after the change's first .tex edit in that repository (paper-push.ts). Enforced by
-                 * PreToolUse hooks, which exist only for Claude leads; checked on the lead's pushes;
+                 * PreToolUse hooks, which exist for Claude and Gemini leads; checked on the lead's pushes;
                  * subagent pushes are not checked. Independent of `validation`. */
                 paperPush: z.enum(['deny', 'advise', 'off']).default('off'),
                 /** Characters of the session's AGENTS.md "Research state" section appended to a

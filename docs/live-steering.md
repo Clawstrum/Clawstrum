@@ -1,8 +1,8 @@
 # Live steering
 
-A message you send while the agent works joins the current run on Claude and Codex. The agent's session and its running tools stay alive. On Gemini the message waits until the run ends. A message with a file attached always waits, on every provider.
+A message you send while the agent works joins the current run on Claude and Codex. The agent's session and its running tools stay alive. Antigravity CLI can't add a message to a running turn, so on Gemini the message ends the current turn and starts a new one with the same context, plus a note to finish the work the old turn was doing. A message with a file attached always waits, on every provider.
 
-Steering is on for every Claude and Codex lead run, including scheduled and recovery runs. It needs no setting or extra credentials. Subagents take corrections from the lead through `research_steer` instead, see [subagent steering](orchestration.md#steering-and-continuing-subagents).
+Steering is on for every Claude, Codex and Gemini lead run, including scheduled and recovery runs. It needs no setting or extra credentials. Subagents take corrections from the lead through `research_steer` instead, see [subagent steering](orchestration.md#steering-and-continuing-subagents).
 
 ## Behavior
 
@@ -28,3 +28,4 @@ Steering is on for every Claude and Codex lead run, including scheduled and reco
 - Accepting a message after a final reply clears the final flag and opens a new reply scope, so old output can't answer the new request. Retries and restarts keep that scope.
 - Claude uses the SDK's [streaming input](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode), in [src/turn-stream.ts](../src/turn-stream.ts). The stream closes once every sent message has a result and no background task is held, after a grace period when background work ran, so late task notices still arrive. `runtime.inputReleaseGraceMs` sets it (default 10,000 ms, 0 to 60,000). If the stream ends while accepted input is unanswered, the run fails as transient and retries.
 - Codex runs through the bundled runtime's [App Server](https://learn.chatgpt.com/docs/app-server) over local stdio, in [src/codex-app-server.ts](../src/codex-app-server.ts), for all lead turns and subagents. Input is sent with `turn/steer` and counts only when the reply names the active turn. Codex requests have a 30-second response limit. An abort sends `turn/interrupt`, waits up to one second, then stops the process.
+- Gemini runs Antigravity CLI over ACP, in [src/gemini-acp.ts](../src/gemini-acp.ts). Live input is a second `session/prompt` on the same session. Antigravity CLI ends the running prompt with no reply text and answers the new one, which carries the note above. A shell command that outlives a turn keeps running in the background and nothing wakes the model when it ends, so a turn that ends with one still running gets one follow-up asking the model to wait for it.

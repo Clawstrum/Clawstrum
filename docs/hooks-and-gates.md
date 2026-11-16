@@ -14,7 +14,7 @@ Clawstrum checks what the agent writes and reviews each outgoing reply once befo
 
 ## Tool-call checks
 
-These run as hooks before each tool call, so they exist only on Claude runs. Codex and Gemini edits are not checked. Findings are saved as `research_validation` events. The agent sees at most ten findings per call.
+These run as hooks before each tool call, on Claude and Gemini runs. On Gemini they run through Antigravity CLI's own hook file, `<account home>/.gemini/config/hooks.json`, and only refusals reach it: notes, the `nice` prefix and other changes to a tool call are dropped there. Codex runs are not checked yet. Findings are saved as `research_validation` events. The agent sees at most ten findings per call.
 
 - A Write or Edit to a `.md`, `.markdown`, `.tex`, `.bib` or `.rst` file is checked for author and year pairs that disagree with the saved record of the DOI or arXiv ID next to them. An Edit only reports problems it introduces. In strict mode, the first citation finding per run and agent refuses the write once.
 - A Write or Edit outside the channel folder, the Clawstrum home, the system temp folder and `research.writeRoots` is reported. In strict mode it is refused every time.
@@ -29,7 +29,7 @@ Every provider can scan any text or file with `research_citation action=scan` an
 
 ## Secret files
 
-On Claude runs with `research.enabled` on, a hook refuses a tool call that would print a secret file, in every validation mode, and logs `secret_print_blocked`. It covers:
+On Claude and Gemini runs with `research.enabled` on, a hook refuses a tool call that would print a secret file, in every validation mode, and logs `secret_print_blocked`. It covers:
 
 - a Read of `.env` or `.env.*`, `.bashrc`, `.bash_profile`, `.profile`, `.zshrc`, `.netrc`, `.pgpass`, `.aws/credentials`, `.git-credentials`, `credentials.json`, `.config/gh/hosts.yml`, or a file named `secret` or `secrets` with the extension `.env`, `.json`, `.yaml`, `.yml` or `.txt`
 - a shell command where `cat`, `less`, `head`, `tail`, `grep`, `sed`, `awk` or a similar reader names one of these files
@@ -43,7 +43,7 @@ Commands that reduce the output to names, counts or masked values pass, for exam
 
 ## Paper push gate
 
-`research.workers.review.paperPush` (`off` by default, or `advise`, `deny`) checks a Claude lead's `git push` of paper changes. Subagent pushes are not checked. It does not depend on `research.validation`.
+`research.workers.review.paperPush` (`off` by default, or `advise`, `deny`) checks a Claude or Gemini lead's `git push` of paper changes. Subagent pushes are not checked. It does not depend on `research.validation`.
 
 Compared with the upstream merge base, the push triggers the gate on a changed caption, section heading, figure or `\includegraphics` line, abstract text, number or image, or on 800 or more changed characters. Such a push needs a checker or reviewer result after the first `.tex` edit. `deny` refuses at most three times per change and `advise` adds a note. What git cannot answer is allowed and recorded as `research_paper_push_gate`.
 

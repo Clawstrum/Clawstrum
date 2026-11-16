@@ -33,7 +33,7 @@ SQLite runs in WAL mode with synchronous FULL. A host-pinned `STORAGE.json` can 
 
 - Each conversation has one active turn. `runtime.maxConcurrent` (default 4) limits turns overall, and an account's `maxConcurrent` limits turns per account.
 - Clawstrum waits while you type, up to a ceiling, before it starts a turn.
-- On Claude and Codex, text you send during a run joins it. On Gemini it waits for the next turn. A message with a file waits too. See [live steering](live-steering.md).
+- On Claude and Codex, text you send during a run joins it. On Gemini it ends the current turn and starts a new one with the same context. A message with a file waits. See [live steering](live-steering.md).
 - Stop affects only input sent up to that moment. Switch keeps unfinished input and hands it to another account. Neither rolls back files or actions already started.
 - Claude's tool approval requests are answered with the configured full-access approval. Arguments are not changed and no permanent rules are stored.
 
@@ -89,7 +89,7 @@ All settings are in the [configuration reference](configuration.md).
 
 ## Research
 
-The daemon also runs research subagents and a Slurm monitor next to the main queue, sharing account capacity. Clawstrum's tools, the research tools included, work on all three providers. Hooks run on Claude only. See [research](research.md).
+The daemon also runs research subagents and a Slurm monitor next to the main queue, sharing account capacity. Clawstrum's tools, the research tools included, work on all three providers. The checks before each tool call run on Claude and Gemini, not yet on Codex. See [research](research.md).
 
 ## Channel groups
 

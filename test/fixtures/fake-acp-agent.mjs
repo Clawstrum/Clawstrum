@@ -1,6 +1,8 @@
 // A stand-in for `agy acp` (Antigravity CLI): JSON-RPC 2.0 lines on stdio. FAKE_ACP_SCENARIO picks the behavior.
 // Every message received is appended to FAKE_ACP_LOG so a test can assert what the client sent.
 import fs from 'node:fs';
+import path from 'node:path';
+import { execSync } from 'node:child_process';
 import readline from 'node:readline';
 
 if (process.argv.includes('--version')) {
@@ -16,6 +18,7 @@ record({
     xdg: process.env.XDG_CONFIG_HOME,
     key: process.env.GEMINI_API_KEY ?? null,
     cloud: process.env.GOOGLE_CLOUD_PROJECT ?? null,
+    hookSocket: process.env.CLAWSTRUM_HOOK_SOCKET ?? null,
   },
 });
 const argAfter = (flag) => {
@@ -281,6 +284,26 @@ readline.createInterface({ input: process.stdin }).on('line', async (line) => {
     }
     update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'bg1', status: 'completed' });
     if (!process.env.FAKE_ACP_SILENT) chunk(sid, 'It printed done.');
+    return send({ id: m.id, result: { stopReason: 'end_turn', usage } });
+  }
+  // Runs the PreToolUse command from <gemini-dir>/config/hooks.json the way agy does: through a
+  // shell, in the hook file's folder, with the payload on stdin. Replies with what it printed.
+  if (scenario === 'hook') {
+    const dir = path.join(argAfter('--gemini-dir'), 'config');
+    const hooks = JSON.parse(fs.readFileSync(path.join(dir, 'hooks.json'), 'utf8'));
+    const payload = {
+      hookEventName: 'PreToolUse',
+      conversationId: sid,
+      cwd: process.cwd(),
+      toolCall: { id: 'call_1', name: 'run_command', args: { CommandLine: 'cat .env' } },
+      workspacePaths: [process.cwd()],
+    };
+    const out = execSync(hooks.clawstrum.PreToolUse[0].hooks[0].command, {
+      cwd: dir,
+      input: JSON.stringify(payload),
+      encoding: 'utf8',
+    });
+    chunk(sid, out.trim());
     return send({ id: m.id, result: { stopReason: 'end_turn', usage } });
   }
   if (scenario === 'crash') process.exit(3);

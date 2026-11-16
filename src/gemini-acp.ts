@@ -5,6 +5,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { ProviderFailure, classifyError } from './accounts.js';
 import { ContextRefresh, REFRESH_PROTOCOL } from './instructions.js';
+import { packageRoot } from './apply.js';
+import { startHookRelay } from './hook-relay.js';
+import { researchHooks } from './research/hooks.js';
 import { runtimeCommand } from './runtime.js';
 import type { Account, Provider, ProviderRequest } from './types.js';
 import { geminiTurnUsage } from './usage.js';
@@ -48,6 +51,49 @@ export const GEMINI_DEFAULT_MODEL = 'gemini-4-argon';
  */
 export function geminiStateDir(account: { home: string }): string {
   return path.join(account.home, '.gemini');
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/** The command agy runs before and after each tool call; it hands the call to the run's hook relay. */
+export function geminiHookCommand(root = packageRoot()): string {
+  return `${shellQuote(process.execPath)} ${shellQuote(path.join(root, 'dist', 'hook-client.js'))} --format gemini`;
+}
+
+/** Writes the "clawstrum" group into agy's hook file, <gemini-dir>/config/hooks.json, and leaves
+ * every other group as it is. Without CLAWSTRUM_HOOK_SOCKET the hook command allows every call. */
+export function ensureGeminiHooks(account: { home: string }, command: string): void {
+  const dir = path.join(geminiStateDir(account), 'config');
+  const file = path.join(dir, 'hooks.json');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  let current: Record<string, unknown> = {};
+  let text: string | undefined;
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  if (text !== undefined) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = undefined;
+    }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+      current = parsed as Record<string, unknown>;
+    else fs.renameSync(file, `${file}.invalid-${Date.now()}`);
+  }
+  const hook = [{ matcher: '*', hooks: [{ type: 'command', command, timeout: 60 }] }];
+  const group = { PreToolUse: hook, PostToolUse: hook };
+  if (JSON.stringify(current.clawstrum) === JSON.stringify(group)) return;
+  const temp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify({ ...current, clawstrum: group }, null, 2) + '\n', {
+    mode: 0o600,
+  });
+  fs.renameSync(temp, file);
 }
 
 /** Auth methods that bill per token or run on an enterprise or cloud account. Never acceptable. */
@@ -438,8 +484,9 @@ function sumUsage(usages: any[]): Record<string, number> {
   return sum;
 }
 
-export const geminiAcpProvider: Provider = {
-  async run(r) {
+export const geminiAcpProvider = {
+  /** `hookCommand` replaces the command written to agy's hook file (tests). */
+  async run(r: ProviderRequest, hookCommand?: string): Promise<string> {
     if (r.controller.signal.aborted) throw r.controller.signal.reason;
     const account = r.account;
     // Subscription only. An account that names an API key, or state that selects one, never starts.
@@ -506,125 +553,159 @@ export const geminiAcpProvider: Provider = {
       }
       segment = '';
     };
-    const connection = new AcpConnection(
-      {
-        command: runtime.command,
-        args,
-        cwd: r.cwd,
-        env: geminiLaunchEnv(r.env, account),
-      },
-      {
-        failure: (error) => {
-          failure = error;
+    // Clawstrum's tool checks reach agy through its own hook file and a relay socket in logDir.
+    let research: ReturnType<typeof researchHooks> | undefined;
+    let relay: Awaited<ReturnType<typeof startHookRelay>> | undefined;
+    const releaseHooks = async () => {
+      await relay?.close();
+      research?.close();
+    };
+    if (!r.toolless)
+      try {
+        research = researchHooks(r);
+        if (research.hooks) {
+          ensureGeminiHooks(account, hookCommand ?? geminiHookCommand());
+          relay = await startHookRelay({
+            hooks: research.hooks,
+            format: 'gemini',
+            dir: logDir,
+            onEvent: r.onEvent,
+          });
+        }
+      } catch (error) {
+        await releaseHooks();
+        fs.rmSync(logDir, { recursive: true, force: true });
+        throw error;
+      }
+    let connection: AcpConnection;
+    try {
+      connection = new AcpConnection(
+        {
+          command: runtime.command,
+          args,
+          cwd: r.cwd,
+          env: { ...geminiLaunchEnv(r.env, account), ...relay?.env },
         },
-        stderr: (text) =>
-          r.onEvent({ type: 'diagnostic', detail: { event: 'gemini_stderr', text } }),
-        notification: (method, p) => {
-          if (method !== 'session/update' || loading || ended) return;
-          if (p?.sessionId && sessionId && p.sessionId !== sessionId) return;
-          const u = p?.update;
-          switch (u?.sessionUpdate) {
-            case 'agent_message_chunk': {
-              const text = textOf(u.content);
-              segment += text;
-              allText += text;
-              if (Date.now() - lastPartialAt >= 1000) {
-                lastPartialAt = Date.now();
-                r.onEvent({ type: 'partial', detail: text });
+        {
+          failure: (error) => {
+            failure = error;
+          },
+          stderr: (text) =>
+            r.onEvent({ type: 'diagnostic', detail: { event: 'gemini_stderr', text } }),
+          notification: (method, p) => {
+            if (method !== 'session/update' || loading || ended) return;
+            if (p?.sessionId && sessionId && p.sessionId !== sessionId) return;
+            const u = p?.update;
+            switch (u?.sessionUpdate) {
+              case 'agent_message_chunk': {
+                const text = textOf(u.content);
+                segment += text;
+                allText += text;
+                if (Date.now() - lastPartialAt >= 1000) {
+                  lastPartialAt = Date.now();
+                  r.onEvent({ type: 'partial', detail: text });
+                }
+                break;
               }
-              break;
-            }
-            case 'user_message_chunk': {
-              // agy echoes a prompt as its turn starts. Text between live input and its echo is
-              // the tail of the turn that input cut off, not part of the answer.
-              const echoed = textOf(u.content);
-              if (steered && echoed && steered.startsWith(echoed.slice(0, 200))) {
-                steered = '';
+              case 'user_message_chunk': {
+                // agy echoes a prompt as its turn starts. Text between live input and its echo is
+                // the tail of the turn that input cut off, not part of the answer.
+                const echoed = textOf(u.content);
+                if (steered && echoed && steered.startsWith(echoed.slice(0, 200))) {
+                  steered = '';
+                  endSegment();
+                  lastSegment = '';
+                  allText = '';
+                }
+                break;
+              }
+              case 'tool_call': {
                 endSegment();
-                lastSegment = '';
-                allText = '';
-              }
-              break;
-            }
-            case 'tool_call': {
-              endSegment();
-              const name = String(u.kind ?? u.title ?? 'tool');
-              toolNames.set(u.toolCallId, name);
-              if (u.kind === 'execute' && u.status !== 'completed' && u.status !== 'failed')
-                running.set(String(u.toolCallId), String(u.rawInput?.CommandLine ?? u.title ?? ''));
-              r.onEvent({
-                type: 'activity',
-                detail: u,
-                tool: { id: String(u.toolCallId), name, state: 'started' },
-              });
-              break;
-            }
-            case 'tool_call_update': {
-              const done = u.status === 'completed' || u.status === 'failed';
-              if (done) running.delete(String(u.toolCallId));
-              r.onEvent({
-                type: 'activity',
-                detail: u,
-                tool: {
-                  id: String(u.toolCallId),
-                  name: toolNames.get(u.toolCallId),
-                  state: done ? 'completed' : 'started',
-                },
-              });
-              if (done) {
+                const name = String(u.kind ?? u.title ?? 'tool');
+                toolNames.set(u.toolCallId, name);
+                if (u.kind === 'execute' && u.status !== 'completed' && u.status !== 'failed')
+                  running.set(
+                    String(u.toolCallId),
+                    String(u.rawInput?.CommandLine ?? u.title ?? ''),
+                  );
                 r.onEvent({
-                  type: 'history',
-                  detail: {
-                    id: `gemini:${sessionId}:${u.toolCallId}`,
-                    kind: 'provider_item',
-                    source: sessionId,
-                    content: u,
-                    counted: true,
+                  type: 'activity',
+                  detail: u,
+                  tool: { id: String(u.toolCallId), name, state: 'started' },
+                });
+                break;
+              }
+              case 'tool_call_update': {
+                const done = u.status === 'completed' || u.status === 'failed';
+                if (done) running.delete(String(u.toolCallId));
+                r.onEvent({
+                  type: 'activity',
+                  detail: u,
+                  tool: {
+                    id: String(u.toolCallId),
+                    name: toolNames.get(u.toolCallId),
+                    state: done ? 'completed' : 'started',
                   },
                 });
-                if (r.maxTurns && ++toolCompletions > r.maxTurns && !budgetExceeded) {
-                  budgetExceeded = true;
-                  connection.notify('session/cancel', { sessionId });
+                if (done) {
+                  r.onEvent({
+                    type: 'history',
+                    detail: {
+                      id: `gemini:${sessionId}:${u.toolCallId}`,
+                      kind: 'provider_item',
+                      source: sessionId,
+                      content: u,
+                      counted: true,
+                    },
+                  });
+                  if (r.maxTurns && ++toolCompletions > r.maxTurns && !budgetExceeded) {
+                    budgetExceeded = true;
+                    connection.notify('session/cancel', { sessionId });
+                  }
                 }
+                break;
               }
-              break;
+              case 'plan':
+                r.onEvent({ type: 'activity', detail: u });
+                break;
+              case 'usage_update':
+                r.onEvent({ type: 'diagnostic', detail: { event: 'gemini_context', ...u } });
+                break;
+              default:
+                break;
             }
-            case 'plan':
-              r.onEvent({ type: 'activity', detail: u });
-              break;
-            case 'usage_update':
-              r.onEvent({ type: 'diagnostic', detail: { event: 'gemini_context', ...u } });
-              break;
-            default:
-              break;
-          }
+          },
+          request: async (method, p) => {
+            if (method === 'session/request_permission')
+              // The configured full-access policy authorizes execution without user approval.
+              return permissionOutcome(p?.options, !r.toolless);
+            if (method === 'fs/read_text_file') {
+              const text = fs.readFileSync(String(p.path), 'utf8');
+              if (!p.line && !p.limit) return { content: text };
+              const lines = text.split('\n');
+              const start = Math.max(0, (p.line ?? 1) - 1);
+              return {
+                content: lines.slice(start, p.limit ? start + p.limit : undefined).join('\n'),
+              };
+            }
+            if (method === 'fs/write_text_file') {
+              if (r.toolless) throw new AcpRpcError(-32000, 'Writes are disabled for this call');
+              fs.mkdirSync(path.dirname(String(p.path)), { recursive: true });
+              fs.writeFileSync(String(p.path), String(p.content ?? ''));
+              return null;
+            }
+            throw new AcpRpcError(
+              -32601,
+              `Clawstrum does not implement ${method}; use Discord for user questions`,
+            );
+          },
         },
-        request: async (method, p) => {
-          if (method === 'session/request_permission')
-            // The configured full-access policy authorizes execution without user approval.
-            return permissionOutcome(p?.options, !r.toolless);
-          if (method === 'fs/read_text_file') {
-            const text = fs.readFileSync(String(p.path), 'utf8');
-            if (!p.line && !p.limit) return { content: text };
-            const lines = text.split('\n');
-            const start = Math.max(0, (p.line ?? 1) - 1);
-            return {
-              content: lines.slice(start, p.limit ? start + p.limit : undefined).join('\n'),
-            };
-          }
-          if (method === 'fs/write_text_file') {
-            if (r.toolless) throw new AcpRpcError(-32000, 'Writes are disabled for this call');
-            fs.mkdirSync(path.dirname(String(p.path)), { recursive: true });
-            fs.writeFileSync(String(p.path), String(p.content ?? ''));
-            return null;
-          }
-          throw new AcpRpcError(
-            -32601,
-            `Clawstrum does not implement ${method}; use Discord for user questions`,
-          );
-        },
-      },
-    );
+      );
+    } catch (error) {
+      await releaseHooks();
+      fs.rmSync(logDir, { recursive: true, force: true });
+      throw error;
+    }
     let cancelled: Promise<unknown> | undefined;
     const abort = () => {
       if (sessionId) connection.notify('session/cancel', { sessionId });
@@ -894,10 +975,11 @@ export const geminiAcpProvider: Provider = {
       await connection.close();
       for (const sent of prompts) void sent.catch(() => {});
       await Promise.allSettled([...injections]);
+      await releaseHooks();
       fs.rmSync(logDir, { recursive: true, force: true });
     }
   },
-};
+} satisfies Provider;
 
 /**
  * Is the account logged in with the Google subscription? Starts `agy acp`, asks for a session (no model
