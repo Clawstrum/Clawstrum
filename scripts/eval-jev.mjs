@@ -18,6 +18,7 @@ const { values } = parseArgs({
     },
     out: { type: 'string' },
     threshold: { type: 'string', default: '0' },
+    provider: { type: 'string', default: 'jev' },
   },
 });
 const threshold = Number(values.threshold);
@@ -25,9 +26,17 @@ if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1)
   throw new Error('threshold must be between 0 and 1');
 if (values.live && !values.out)
   throw new Error('Live evaluation requires --out for reproducible artifacts');
-const config = decisionsSchema.parse({ foregroundTimeoutMs: 10000, dailyBudgetUsd: 0.05 });
+// Recorded responses are Jev's, so replay always runs as Jev.
+const config = decisionsSchema.parse({
+  provider: values.live ? values.provider : 'jev',
+  foregroundTimeoutMs: 10000,
+  openrouter: { foregroundTimeoutMs: 10000 },
+  dailyBudgetUsd: 0.05,
+});
 if (values.live && !decisionsAvailable(config))
-  throw new Error('Live evaluation requires JEV_API_KEY or TYPESAFE_API_KEY');
+  throw new Error(
+    'Live evaluation requires JEV_API_KEY or TYPESAFE_API_KEY, or OPENROUTER_API_KEY with --provider openrouter',
+  );
 const home = values.out
   ? path.resolve(values.out)
   : fs.mkdtempSync(path.join(os.tmpdir(), 'clawstrum-jev-eval-'));

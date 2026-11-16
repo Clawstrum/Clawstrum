@@ -12,6 +12,7 @@ if (process.env.CLAWSTRUM_TEST_REQUIRE_SLURM === '1' && !process.env.SLURM_JOB_I
 const env = { ...process.env };
 delete env.JEV_API_KEY;
 delete env.TYPESAFE_API_KEY;
+delete env.OPENROUTER_API_KEY;
 const files = fs
   .readdirSync('test')
   .filter((name) => name.endsWith('.test.ts'))

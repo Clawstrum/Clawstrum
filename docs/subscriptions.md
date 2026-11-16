@@ -4,7 +4,7 @@ Clawstrum is designed for coding agents' SDKs and the Agent Client Protocol (ACP
 
 Codex supports ChatGPT subscription login. Clawstrum forces that login method in the SDK configuration and gives each profile its own `CODEX_HOME`. [Official Codex authentication](https://learn.chatgpt.com/docs/auth).
 
-Claude uses the user's own Claude login through the bundled Claude Code runtime. Anthropic's Agent SDK terms ask products built by others to get Anthropic's approval before offering Claude subscription login ([Claude Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)).
+Claude uses the user's own Claude login through the bundled Claude Code runtime.
 
 ## Gemini (Antigravity CLI over ACP)
 

@@ -34,7 +34,7 @@ Type `/setup` in Claude Code, or say "help me install Clawstrum" in Codex. The a
 3. It invites the bot and makes your first channel, `main`.
 4. It signs the agent in to Claude, ChatGPT or Google, starts it and keeps it running: as a service, or in tmux on a cluster login node, with the agent's heavy work sent to jobs.
 
-Then open `main`. The agent writes first: who it is, a few ideas to make it yours and one question. That first conversation is about you: your field, how you like answers, the projects you want, each in its own channel, and where your work runs. You can skip any question or stop halfway, and it writes nothing without your yes. `main` is also where you tell the agent what to improve.
+Then open `main`. The agent writes first: who it is, a few ideas to make it yours and one question. That first conversation is about you: your field, how you like answers, the projects you want, each in its own channel, and where your work runs. It also offers voice notes and a few optional keys. You can skip any question or stop halfway, and it writes nothing without your yes. `main` is also where you tell the agent what to improve.
 
 To install without an agent, see [setup](docs/setup.md).
 

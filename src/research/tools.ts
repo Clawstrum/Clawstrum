@@ -27,7 +27,7 @@ import { saveNote, noteSchema, noteRevisions } from './records.js';
 import { delegate, delegationSchema } from './workers.js';
 import { steerWorker, workerSteers, closeWorkerSteers } from './steering.js';
 import { preflight, submitJob, watchJob, batchSchema, watchSchema } from './cluster.js';
-import { DecisionService, decisionKey } from '../decisions/client.js';
+import { DecisionService, decisionKey, decisionProvider } from '../decisions/client.js';
 import { searchLiterature, searchInputSchema } from './search.js';
 import { workerAdvice } from '../decisions/advice.js';
 import { decisionProfile } from '../decisions/profile.js';
@@ -215,7 +215,7 @@ export async function researchTool(
           workerId: ctx.workerId,
         },
         jevConcurrency: Math.min(24, config.decisions.maxConcurrent),
-        jevUsdPerMillion: config.decisions.inputUsdPerMillion,
+        jevUsdPerMillion: decisionProvider(config.decisions).inputUsdPerMillion,
         secrets: [decisionKey(config.decisions) ?? ''],
         signal,
       });

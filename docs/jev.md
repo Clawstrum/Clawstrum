@@ -1,6 +1,6 @@
 # Optional Jev decision service
 
-Jev is a paid typed-decision API from TypeSafe (https://typesafe.ai). Clawstrum calls it only when `JEV_API_KEY` is set; without a key everything works and the decisions fall back to local rules.
+Jev is a paid typed-decision API from TypeSafe (https://typesafe.ai). Clawstrum calls it only when `JEV_API_KEY` is set; without a key everything works and the decisions fall back to local rules. A chat model on OpenRouter can take its place: see [OpenRouter instead of Jev](#openrouter-instead-of-jev).
 
 Clawstrum uses Jev for small typed decisions alongside its subscription-backed Claude, Codex and Gemini agents. It does not replace their execution loop, write memory summaries, or control permissions. The active advisory integrations default on; an API key enables their bounded auxiliary calls. An installation without Jev remains fully usable.
 
@@ -46,6 +46,31 @@ The model must be a pinned version identifier. The transport calls only the offi
 
 Each request has a deadline including retries and waiting on an identical request. Retryable HTTP responses use bounded backoff and `Retry-After`; authentication failures are not retried. A network exception takes the fallback path. Oversize requests explicitly fall back instead of silently truncating service inputs. Feature adapters label their own sampled passages and preserve a path to complete evidence.
 
+## OpenRouter instead of Jev
+
+OpenRouter (https://openrouter.ai) sells access to many companies' chat models through one key. With `"provider": "openrouter"` in `decisions`, the same questions go to one of those models instead of Jev; the features and fallbacks above stay the same. Put the key in `OPENROUTER_API_KEY` in the private `.env`. Only `config.json` chooses the provider: an OpenRouter key alone never turns it on, and a Jev key is not used while it is on.
+
+```json
+{
+  "decisions": {
+    "provider": "openrouter",
+    "openrouter": {
+      "model": "openai/gpt-4.1-nano",
+      "apiKeyEnv": "OPENROUTER_API_KEY",
+      "foregroundTimeoutMs": 3000,
+      "inputUsdPerMillion": 0.1,
+      "outputUsdPerMillion": 0.4
+    }
+  }
+}
+```
+
+The values shown are the defaults. Each call sends the state and the questions with a JSON schema the reply must match (OpenRouter's structured outputs, sent only to providers that support every request parameter). For a `choice` or `score` question the model states one confidence in its pick, and the rest of the probability is spread evenly over the other labels; a `noul` answer is its stated probability of yes. These are a chat model's own estimates, not calibrated like Jev's. A reply that does not match the schema takes the fallback.
+
+Use a fixed model id whose OpenRouter page lists structured outputs and temperature; router ids such as `openrouter/auto` are refused. When you change the model, change the two prices with it: they are its list prices in USD per million tokens and count against `dailyBudgetUsd`. The foreground limit is 3 seconds instead of Jev's 1 because a chat model takes longer; skill suggestions and message recall wait for it before a turn starts.
+
+The request goes to OpenRouter and to the company that serves the model, with the same content Jev would get. OpenRouter's privacy settings (https://openrouter.ai/settings/privacy) decide whether providers that keep or train on prompts may be used.
+
 ## Retrieval and memory integrity
 
 `clawstrum history SESSION --action rank --query "current clustering decision"` and the MCP history tool share the same implementation. Shared and group scopes follow the normal history authorization rules. Ranking never searches other channels implicitly.
@@ -81,9 +106,10 @@ From a source checkout after building:
 node scripts/eval-jev.mjs
 node scripts/eval-jev.mjs --threshold 0.8
 node scripts/eval-jev.mjs --live --out /private/new-evaluation-directory
+node scripts/eval-jev.mjs --live --provider openrouter --out /private/another-new-directory
 ```
 
-`npm test` and the package smoke remove ambient Jev keys so normal automated tests stay synthetic. The live evaluation below is opt-in.
+`npm test` and the package smoke remove ambient Jev and OpenRouter keys so normal automated tests stay synthetic. The live evaluation below is opt-in.
 
 Default mode replays eight recorded synthetic development cases with no network access. `--live` explicitly calls the API using the supplied fixture and stores fresh artifacts. `--fixture path.json` accepts additional cases with `id`, `state`, `questions`, `expected` choice labels and, for replay, `recorded` responses. The report separates availability, exact label matches, accepted accuracy and abstention. Its threshold is an evaluation parameter, not a production policy.
 

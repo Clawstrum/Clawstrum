@@ -23,7 +23,7 @@
 - [CLI](cli.md): every `clawstrum` command.
 - [Instructions](instructions.md): `AGENTS.md` files shared by Claude, Codex and Gemini, and live refresh.
 - [Hooks and gates](hooks-and-gates.md): citation checks, reply review and validation modes.
-- [Jev](jev.md): the optional decision service.
+- [Jev](jev.md): the optional decision service, or a chat model on OpenRouter in its place.
 
 ## Internals
 

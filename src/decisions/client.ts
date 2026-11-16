@@ -6,6 +6,12 @@ import type { Store } from '../store.js';
 import { writePrivate } from '../files.js';
 import { abortAfter } from '../async.js';
 import type { DecisionsConfig } from './config.js';
+import {
+  OPENROUTER_URL,
+  openRouterBody,
+  openRouterDecision,
+  openRouterUsage,
+} from './openrouter.js';
 
 const probability = z.number().finite().min(0).max(1);
 export const questionSchema = z.discriminatedUnion('type', [
@@ -125,7 +131,22 @@ function put(store: Store, key: string, value: unknown) {
     JSON.stringify(value),
   );
 }
+/** The configured provider's model, key variable, foreground limit and prices; none is shared. */
+export function decisionProvider(config: DecisionsConfig) {
+  return config.provider === 'openrouter'
+    ? { name: 'openrouter' as const, ...config.openrouter }
+    : {
+        name: 'jev' as const,
+        model: config.model,
+        apiKeyEnv: config.apiKeyEnv,
+        foregroundTimeoutMs: config.foregroundTimeoutMs,
+        inputUsdPerMillion: config.inputUsdPerMillion,
+        outputUsdPerMillion: 0,
+      };
+}
 export function decisionKey(config: DecisionsConfig, env: NodeJS.ProcessEnv = process.env) {
+  // Only the configured provider's key counts: a Jev key never sends to OpenRouter or the reverse.
+  if (config.provider === 'openrouter') return env[config.openrouter.apiKeyEnv] || undefined;
   return (
     env[config.apiKeyEnv] || (config.apiKeyEnv === 'JEV_API_KEY' ? env.TYPESAFE_API_KEY : undefined)
   );
@@ -139,7 +160,7 @@ export function decisionEnvironment(
   env: NodeJS.ProcessEnv = process.env,
 ): Record<string, string> {
   const key = config.enabled ? decisionKey(config, env) : undefined;
-  return key ? { [config.apiKeyEnv]: key } : {};
+  return key ? { [decisionProvider(config).apiKeyEnv]: key } : {};
 }
 export function validateDecision(
   raw: unknown,
@@ -208,7 +229,7 @@ export function validateDecision(
   return { model: base.model, answers, usage: base.usage };
 }
 
-/** One HTTP endpoint and one durable budget/cache across daemon and MCP processes. */
+/** One endpoint (Jev or OpenRouter) and one durable budget/cache across daemon and MCP processes. */
 export class DecisionService {
   constructor(
     readonly store: Store,
@@ -243,9 +264,16 @@ export class DecisionService {
         (Object.keys(question.criteria).length < 2 || Object.keys(question.criteria).length > 100)
       )
         throw new Error('choice_count');
-    const body = canonical({ model: this.config.model, state: input.state, questions });
+    const provider = decisionProvider(this.config);
+    const model = provider.model;
+    // The size limit and cache key cover the same state and questions for either provider.
+    const body = canonical({ model, state: input.state, questions });
+    const payload =
+      provider.name === 'openrouter'
+        ? openRouterBody(model, canonical({ state: input.state, questions }), questions)
+        : body;
     const requestHash = decisionHash({
-      model: this.config.model,
+      model,
       feature: input.feature,
       version: input.version,
       scope: input.scope,
@@ -256,7 +284,7 @@ export class DecisionService {
     const cacheKey = `jev:cache:${requestHash}`,
       flightKey = `jev:flight:${requestHash}`;
     const deadline =
-      at + (input.background ? this.config.backgroundTimeoutMs : this.config.foregroundTimeoutMs);
+      at + (input.background ? this.config.backgroundTimeoutMs : provider.foregroundTimeoutMs);
     const timeout = new AbortController();
     const timer = setTimeout(() => timeout.abort(), deadline - at);
     const signal = input.signal ? AbortSignal.any([input.signal, timeout.signal]) : timeout.signal;
@@ -271,7 +299,7 @@ export class DecisionService {
       workerId: input.workerId,
       stateHash: decisionHash(input.state),
       requestHash,
-      requestedModel: this.config.model,
+      requestedModel: model,
       status: 'unavailable',
       cached: false,
       latencyMs: 0,
@@ -303,7 +331,7 @@ export class DecisionService {
                 version: input.version,
                 scope: input.scope,
                 sources: input.sources ?? [],
-                model: this.config.model,
+                model,
                 state: input.state,
                 questions,
               },
@@ -326,7 +354,7 @@ export class DecisionService {
           const cached = read<Cache>(this.store, cacheKey);
           if (cached && cached.expires > Date.now()) {
             try {
-              validateDecision(cached.response, this.config.model, questions);
+              validateDecision(cached.response, model, questions);
               return cached;
             } catch {
               this.store.exec('DELETE FROM metadata WHERE key=?', cacheKey);
@@ -345,7 +373,7 @@ export class DecisionService {
             id,
             cached: true,
             artifact: found.artifact,
-            response: validateDecision(found.response, this.config.model, questions),
+            response: validateDecision(found.response, model, questions),
           });
         if (owned) break;
         await delay(Math.min(40, Math.max(1, deadline - Date.now())), undefined, { signal });
@@ -353,7 +381,7 @@ export class DecisionService {
       writePrivate(
         artifact,
         JSON.stringify({
-          model: this.config.model,
+          model,
           state: input.state,
           questions,
           sources: input.sources ?? [],
@@ -367,7 +395,11 @@ export class DecisionService {
         const budgetKey = `jev:budget:${day}`,
           leaseKey = `jev:lease:${id}`;
         // Reserve a conservative estimate before sending. Missing usage retains the reservation.
-        const reserve = ((Buffer.byteLength(body) + 2048) * this.config.inputUsdPerMillion) / 1e6;
+        // A byte bounds a token from above; a chat model answers in under 64 tokens per question.
+        const reserve =
+          ((Buffer.byteLength(payload) + 2048) * provider.inputUsdPerMillion +
+            (64 + 64 * Object.keys(questions).length) * provider.outputUsdPerMillion) /
+          1e6;
         const admission = this.store.transaction(() => {
           this.store.exec(
             "DELETE FROM metadata WHERE key GLOB 'jev:lease:*' AND json_extract(value,'$.expires')<=?",
@@ -390,17 +422,22 @@ export class DecisionService {
         let response: Response;
         try {
           response = await abortAfter(
-            this.transport('https://api.typesafe.ai/v1/systemone', {
-              method: 'POST',
-              redirect: 'error',
-              signal,
-              headers: {
-                Authorization: `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'User-Agent': 'Clawstrum/0.1',
+            this.transport(
+              provider.name === 'openrouter'
+                ? OPENROUTER_URL
+                : 'https://api.typesafe.ai/v1/systemone',
+              {
+                method: 'POST',
+                redirect: 'error',
+                signal,
+                headers: {
+                  Authorization: `Bearer ${apiKey}`,
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'Clawstrum/0.1',
+                },
+                body: payload,
               },
-              body,
-            }),
+            ),
             signal,
           );
           if (!response.ok) {
@@ -432,9 +469,12 @@ export class DecisionService {
               input_tokens: z.number().int().nonnegative(),
               output_tokens: z.number().int().nonnegative(),
             })
-            .safeParse(raw?.usage);
+            .safeParse(provider.name === 'openrouter' ? openRouterUsage(raw) : raw?.usage);
           if (usage.success) {
-            const actual = (usage.data.input_tokens * this.config.inputUsdPerMillion) / 1e6;
+            const actual =
+              (usage.data.input_tokens * provider.inputUsdPerMillion +
+                usage.data.output_tokens * provider.outputUsdPerMillion) /
+              1e6;
             this.store.transaction(() =>
               put(
                 this.store,
@@ -449,7 +489,11 @@ export class DecisionService {
           }
           let decoded: DecisionResponse;
           try {
-            decoded = validateDecision(raw, this.config.model, questions);
+            decoded = validateDecision(
+              provider.name === 'openrouter' ? openRouterDecision(raw, model, questions) : raw,
+              model,
+              questions,
+            );
           } catch {
             return finish({ status: 'unavailable', id, reason: 'invalid_response' });
           }

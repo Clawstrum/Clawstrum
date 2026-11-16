@@ -366,6 +366,9 @@ export function canonicalPath(filename: string, hops = 32): string {
 }
 export function normalizeConfig(home: string, value: unknown): Config {
   const config = configSchema.parse(value);
+  // Custom key names the secret pattern misses stay out of agent environments too.
+  rememberSecretName(config.decisions.apiKeyEnv);
+  rememberSecretName(config.decisions.openrouter.apiKeyEnv);
   for (const a of config.accounts) {
     if (a.tokenEnv) rememberSecretName(a.tokenEnv);
     a.home = canonicalPath(

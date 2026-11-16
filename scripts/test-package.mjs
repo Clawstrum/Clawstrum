@@ -13,6 +13,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 const root = process.cwd();
 delete process.env.JEV_API_KEY;
 delete process.env.TYPESAFE_API_KEY;
+delete process.env.OPENROUTER_API_KEY;
 const temporary = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clawstrum-package-')));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 function command(executable, args, options = {}) {
