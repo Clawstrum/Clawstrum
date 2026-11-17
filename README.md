@@ -1,7 +1,7 @@
 <h1 align="center">Clawstrum</h1>
 
 <p align="center">
-  A research agent in your Discord, running on your own machine.
+  A personal and customizable research agent for computational science.
 </p>
 
 <p align="center">
