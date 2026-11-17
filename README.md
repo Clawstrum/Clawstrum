@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.png">
+    <img src="docs/images/logo.png" width="140" alt="Clawstrum logo">
+  </picture>
+</p>
+
 <h1 align="center">Clawstrum</h1>
 
 <p align="center">
